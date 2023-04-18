@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-# test fork
+
 import argparse
 from logging import Logger
 import os
