@@ -384,7 +384,7 @@ class Trainer:
             LOGGER.info(f'Loading state_dict from {weights} for fine-tuning...')
             model = load_state_dict(weights, model, map_location=device)
 
-        LOGGER.info('Model: {}'.format(model))
+        # LOGGER.info('Model: {}'.format(model))
         return model
 
     def get_teacher_model(self, args, cfg, nc, device):
