@@ -306,9 +306,13 @@ class TrainValDataset(Dataset):
             LOGGER.info(
                 f"{self.task}: Checking formats of labels with {NUM_THREADS} process(es): "
             )
+            cls_n_dict = {}
+            for idx, cn in enumerate(self.class_names):
+                cls_n_dict[cn] = idx
+            check_class_names = [cls_n_dict for _ in range(len(img_paths))]
             with Pool(NUM_THREADS) as pool:
                 pbar = pool.imap(
-                    TrainValDataset.check_label_files, zip(img_paths, label_paths)
+                    TrainValDataset.check_label_files, zip(check_class_names, img_paths, label_paths)
                 )
                 pbar = tqdm(pbar, total=len(label_paths)) if self.main_process else pbar
                 for (
@@ -377,6 +381,11 @@ class TrainValDataset(Dataset):
         LOGGER.info(
             f"{self.task}: Final numbers of valid images: {len(img_paths)}/ labels: {len(labels)}. "
         )
+
+        # 这里处理一下labels, 得到average/diff WHL, angle_bin, cos sin.
+        # function: 3D_Attributes_preprocess
+        # self.3D_Attributes_preprocess(img_paths, labels) -> labels, self.averageClassDims
+
         return img_paths, labels
 
     def get_mosaic(self, index):
@@ -491,7 +500,8 @@ class TrainValDataset(Dataset):
 
     @staticmethod
     def check_label_files(args):
-        img_path, lb_path = args
+        cls_n_dict, img_path, lb_path = args
+        H, W = cv2.imread(img_path).shape[:2]
         nm, nf, ne, nc, msg = 0, 0, 0, 0, ""  # number (missing, found, empty, message
         try:
             if osp.exists(lb_path):
@@ -500,16 +510,29 @@ class TrainValDataset(Dataset):
                     labels = [
                         x.split() for x in f.read().strip().splitlines() if len(x)
                     ]
+
+                    # 将 type 转换成 class_id
+                    for idx in range(len(labels)):
+                        labels[idx][0] = cls_n_dict[labels[idx][0]]
+
+                    # 得到 ndarrsy labels
                     labels = np.array(labels, dtype=np.float32)
+
+                    # 2D bbox xyxy -> cxcywh
+                    labels[:, 6] = (labels[:, 6] - labels[:, 4]) / W
+                    labels[:, 7] = (labels[:, 7] - labels[:, 5]) / H
+                    labels[:, 4] = labels[:, 4] / W + labels[:, 6] / 2
+                    labels[:, 5] = labels[:, 5] / H + labels[:, 7] / 2
+
                 if len(labels):
                     assert all(
-                        len(l) == 5 for l in labels
+                        len(l) == 15 for l in labels
                     ), f"{lb_path}: wrong label format."
                     assert (
-                        labels >= 0
+                        labels[:, [0, 1, 2, 4, 5, 6, 7, 8, 9, 10]] >= 0
                     ).all(), f"{lb_path}: Label values error: all values in label file must > 0"
                     assert (
-                        labels[:, 1:] <= 1
+                        labels[:, 4:8] <= 1
                     ).all(), f"{lb_path}: Label values error: all coordinates must be normalized"
 
                     _, indices = np.unique(labels, axis=0, return_index=True)
