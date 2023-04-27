@@ -58,6 +58,8 @@ class TrainValDataset(Dataset):
         rank=-1,
         data_dict=None,
         task="train",
+        bins=2,
+        overlap=0.1
     ):
         assert task.lower() in ("train", "val", "test", "speed"), f"Not supported task: {task}"
         t1 = time.time()
@@ -65,6 +67,8 @@ class TrainValDataset(Dataset):
         self.main_process = self.rank in (-1, 0)
         self.task = self.task.capitalize()
         self.class_names = data_dict["names"]
+        self.bins = bins
+        self.overlap = overlap
         self.img_paths, self.labels = self.get_imgs_labels(self.img_dir)
         if self.rect:
             shapes = [self.img_info[p]["shape"] for p in self.img_paths]
@@ -300,6 +304,11 @@ class TrainValDataset(Dataset):
         if "label_hash" not in cache_info or cache_info["label_hash"] != label_hash:
             self.check_labels = True
 
+        self.cls_na_dict = {}
+        for idx, cn in enumerate(self.class_names):
+            self.cls_na_dict[cn] = idx
+        check_class_names = [self.cls_na_dict for _ in range(len(img_paths))]
+
         if self.check_labels:
             cache_info["label_hash"] = label_hash
             nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # number corrupt, messages
@@ -364,6 +373,9 @@ class TrainValDataset(Dataset):
                     img_info, self.class_names, save_path
                 )
 
+        # 现在labels返回的和以前完全不一样了,返回的是Rope3d的labels, 将type转换成了type_id
+        # 所以后面有两件事情需要做: 1. generate_coco_format_labels生成instance_val.json的时候,不需要将xc, yc, w, h转换为x1, y1, x2, y2;
+        #                      2. attributes_3d_preprocess在最后的时候需要将 x1, y1, x2, y2 转换成 xc, yc, w, h, 不然后面的代码全都要修改,容易出bug;
         img_paths, labels = list(
             zip(
                 *[
@@ -371,7 +383,7 @@ class TrainValDataset(Dataset):
                         img_path,
                         np.array(info["labels"], dtype=np.float32)
                         if info["labels"]
-                        else np.zeros((0, 5), dtype=np.float32),
+                        else np.zeros((0, 15), dtype=np.float32),
                     )
                     for img_path, info in img_info.items()
                 ]
@@ -382,9 +394,11 @@ class TrainValDataset(Dataset):
             f"{self.task}: Final numbers of valid images: {len(img_paths)}/ labels: {len(labels)}. "
         )
 
-        # 这里处理一下labels, 得到average/diff WHL, angle_bin, cos sin.
+        # 这里处理一下labels, 得到average/diff HWL, angle_bin, cos sin.
         # function: 3D_Attributes_preprocess
         # self.3D_Attributes_preprocess(img_paths, labels) -> labels, self.averageClassDims
+
+        labels = self.attributes_3d_preprocess(img_paths, labels)
 
         return img_paths, labels
 
@@ -501,7 +515,6 @@ class TrainValDataset(Dataset):
     @staticmethod
     def check_label_files(args):
         cls_n_dict, img_path, lb_path = args
-        H, W = cv2.imread(img_path).shape[:2]
         nm, nf, ne, nc, msg = 0, 0, 0, 0, ""  # number (missing, found, empty, message
         try:
             if osp.exists(lb_path):
@@ -518,12 +531,6 @@ class TrainValDataset(Dataset):
                     # 得到 ndarrsy labels
                     labels = np.array(labels, dtype=np.float32)
 
-                    # 2D bbox xyxy -> cxcywh
-                    labels[:, 6] = (labels[:, 6] - labels[:, 4]) / W
-                    labels[:, 7] = (labels[:, 7] - labels[:, 5]) / H
-                    labels[:, 4] = labels[:, 4] / W + labels[:, 6] / 2
-                    labels[:, 5] = labels[:, 5] / H + labels[:, 7] / 2
-
                 if len(labels):
                     assert all(
                         len(l) == 15 for l in labels
@@ -531,9 +538,9 @@ class TrainValDataset(Dataset):
                     assert (
                         labels[:, [0, 1, 2, 4, 5, 6, 7, 8, 9, 10]] >= 0
                     ).all(), f"{lb_path}: Label values error: all values in label file must > 0"
-                    assert (
-                        labels[:, 4:8] <= 1
-                    ).all(), f"{lb_path}: Label values error: all coordinates must be normalized"
+                    # assert (
+                    #     labels[:, 4:8] <= 1
+                    # ).all(), f"{lb_path}: Label values error: all coordinates must be normalized"
 
                     _, indices = np.unique(labels, axis=0, return_index=True)
                     if len(indices) < len(labels):  # duplicate row check
@@ -578,13 +585,7 @@ class TrainValDataset(Dataset):
             )
             if labels:
                 for label in labels:
-                    c, x, y, w, h = label[:5]
-                    # convert x,y,w,h to x1,y1,x2,y2
-                    x1 = (x - w / 2) * img_w
-                    y1 = (y - h / 2) * img_h
-                    x2 = (x + w / 2) * img_w
-                    y2 = (y + h / 2) * img_h
-                    # cls_id starts from 0
+                    c, x1, y1, x2, y2 = label[0, 4, 5, 6, 7]
                     cls_id = int(c)
                     w = max(0, x2 - x1)
                     h = max(0, y2 - y1)
@@ -614,6 +615,157 @@ class TrainValDataset(Dataset):
         assert isinstance(paths, list), "Only support list currently."
         h = hashlib.md5("".join(paths).encode())
         return h.hexdigest()
+
+    def attributes_3d_preprocess(self, img_paths, labels):
+        """
+        Args:
+            img_paths (tuple(str)): all img paths
+            labels (tuple(ndarray)): all labels (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H, W, L, X, Y, Z, ry)
+        Return:
+            labels (tuple(ndarray)): propcessed all labels (type_id, truncated, occluded, alpha, cx, cy, w, h, H_diff, W_diff, L_diff, X, Y, Z, ry, bin_conf, bin_cos_sin)
+        """
+        # read camera calib matrix
+        # self.proj_matrix tuple(np.matrix)
+        calib_paths = tuple([osp.join(osp.dirname(im).replace("images", "calibs"), osp.basename(im).replace("jpg", "txt")) \
+                             for im in img_paths])
+        def get_calib(paths):
+            calib_list = []
+            for p in paths:
+                with open(p, 'r')as f:
+                    parse_file = f.read().strip().splitlines()
+                    for line in parse_file:
+                        if line is not None and line.split()[0] == "P2:":
+                            calib_matrix = np.array(line.split()[1:], dtype=np.float32).reshape(3, 4)
+                            calib_list.append(calib_matrix)
+            return tuple(calib_list)
+
+        self.proj_matrix = get_calib(calib_paths)
+
+        # ave HWL
+        self.average_dims = {}
+        for i in range(len(self.class_names)):
+            if i not in self.average_dims.keys():
+                self.average_dims[i] = {}
+            self.average_dims[i]["total"] = np.zeros(3)
+            self.average_dims[i]["count"] = 0
+            self.average_dims[i]["hwl"] = []
+
+        for label in labels:
+            for i in range(len(self.class_names)):
+                self.average_dims[i]["total"] += label[label[:, 0] == i][:, 8:11].sum(axis=0)
+                self.average_dims[i]["count"] += (label[:, 0] == i).sum()
+                self.average_dims[i]["hwl"].extend(label[label[:, 0] == i][:, 8:11])
+
+        for i in range(len(self.class_names)):
+            self.average_dims[i]["ave"] = self.average_dims[i]["total"] / (self.average_dims[i]["count"] + 1e-6)
+            self.average_dims[i]["hwl"] = np.array(self.average_dims[i]["hwl"])
+
+        # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H, W, L, X, Y, Z, ry)
+        # to
+        # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H_diff, W_diff, L_diff, X, Y, Z, ry, H_ave, W_ave, L_ave)
+        labels = list(labels)
+        for idx, label in enumerate(labels):
+            ave_dims = np.zeros((label.shape[0], 3))
+            for i in range(len(label)):
+                label[i, 8:11] -= self.average_dims[label[i, 0]]["ave"]
+                ave_dims[i, :] = self.average_dims[label[i, 0]]["ave"]
+            labels[idx] = np.concatenate((label, ave_dims), axis=1)
+
+
+        # angle_bins
+        interval = 2 * np.pi / self.bins
+        self.angle_bins = np.zeros(self.bins)
+        for i in range(1, self.bins):
+            self.angle_bins[i] = i * interval
+        self.angle_bins += interval / 2 # center of the bin
+
+
+        # bin_ranges for confidence
+        # [(min angle in bin, max angle in bin), ...]
+        self.bin_ranges = np.zeros((self.bins, 2))
+        for i in range(0, self.bins):
+            self.bin_ranges[i, 0] = (i * interval - self.overlap) % (2 * np.pi)
+            self.bin_ranges[i, 1] = (i * interval + interval + self.overlap) % (2 * np.pi)
+
+
+        def get_bin(angle, bin_ranges):
+            bin_idxs = []
+
+            def is_between(min, max, angle):
+                max = (max - min) if (max - min) > 0 else (max - min) + 2 * np.pi
+                angle = (angle - min) if (angle - min) > 0 else (angle - min) + 2 * np.pi
+                return angle < max
+
+            for bin_idx, bin_range in enumerate(bin_ranges):
+                if is_between(bin_range[0], bin_range[1], angle):
+                    bin_idxs.append(bin_idx)
+
+            return bin_idxs
+
+        # orientations, confidences
+        orientations = []
+        confidences = []
+        for i in range(len(labels)):
+            nl = labels[i].shape[0]
+            orientation = np.zeros((nl, self.bins, 2))
+            confidence  = np.zeros((nl, self.bins))
+            angles = (labels[i][:, 3] + np.pi).reshape(nl, 1)
+            for an_id, angle in enumerate(angles):
+                bin_idxs = get_bin(angle[0], self.bin_ranges)
+                for bin_idx in bin_idxs:
+                    angle_diff = angle - self.angle_bins[bin_idx]
+                    orientation[an_id, bin_idx, :] = np.array([np.cos(angle_diff), np.sin(angle_diff)]).squeeze(axis=1)
+                    confidence[an_id, bin_idx] = 1
+
+            orientations.append(orientation)
+            confidences.append(confidence)
+
+        # compute theta_ray
+        def calc_theta_ray(width, box_2d, proj_matrix):
+            fovx = 2 * np.arctan(width / (2 * proj_matrix[0, 0]))
+            center = (box_2d[2] + box_2d[0]) / 2
+            dx = center - (width / 2)
+
+            mult = 1
+            if dx < 0:
+                mult = -1
+            dx = abs(dx)
+            angle = np.arctan((2 * dx * np.tan(fovx / 2)) / width)
+            angle = angle * mult
+
+            return angle
+
+        theta_rays = []
+        for i, label in enumerate(labels):
+            theta = np.zeros((label.shape[0], 1))
+            H, W = cv2.imread(img_paths[i]).shape[:2]
+            for idx in range(len(label)):
+                theta[idx, 0] = calc_theta_ray(W, label[idx, 4:8], self.proj_matrix[i])
+            theta_rays.append(theta)
+
+        # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H_diff, W_diff, L_diff, X, Y, Z, ry, H_ave, W_ave, L_ave)
+        # to
+        # (type_id, truncated, occluded, alpha, xc, yc, w, h, H_diff, W_diff, L_diff, X, Y, Z, ry, H_ave, W_ave, L_ave)
+        for label in labels:
+            # xyxy-> cxcywh
+            label[:, 6] = (label[:, 6] - label[:, 4]) / W
+            label[:, 7] = (label[:, 7] - label[:, 5]) / H
+            label[:, 4] = label[:, 4] / W + label[:, 6] / 2
+            label[:, 5] = label[:, 5] / H + label[:, 7] / 2
+
+        # (type_id, truncated, occluded, alpha,xc, yc, w, h, H_diff, W_diff, L_diff, X, Y, Z, ry, H_ave, W_ave, L_ave)
+        # to
+        # (type_id, truncated, occluded, alpha, xc, yc, w, h, H_diff, W_diff, L_diff, X, Y, Z, ry, H_ave, W_ave, L_ave, theta_ray, cos, sin, confidence)
+        labels_new = []
+        for label, theta, orientation, confidence in zip(labels, theta_rays, orientations, confidences):
+            labels_new.append(
+                np.concatenate((label, theta, orientation.reshape(-1, self.bins*2), confidence), axis=1)
+            )
+
+        return tuple(labels_new)
+
+
+        # return labels tuple(ndarray)
 
 
 class LoadData:
