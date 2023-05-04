@@ -185,7 +185,7 @@ def mosaic_augmentation(img_size, imgs, hs, ws, labels, hyp):
 
     # Concat/clip labels
     labels4 = np.concatenate(labels4, 0)
-    for x in (labels4[:, 1:]):
+    for x in (labels4[:, 1:5]):
         np.clip(x, 0, 2 * s, out=x)
 
     # Augment

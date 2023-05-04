@@ -45,6 +45,9 @@ class ComputeLoss:
         self.iou_type = iou_type
         self.varifocal_loss = VarifocalLoss().cuda()
         self.bbox_loss = BboxLoss(self.num_classes, self.reg_max, self.use_dfl, self.iou_type).cuda()
+        self.dim_loss = nn.MSELoss().cuda()
+        self.conf_loss = nn.CrossEntropyLoss().cuda()
+
         self.loss_weight = loss_weight       
         
     def __call__(
@@ -55,18 +58,21 @@ class ComputeLoss:
         step_num
     ):
         
-        feats, pred_scores, pred_distri = outputs
+        feats, pred_scores, pred_distri, pred_dim, pred_orient, pred_conf = outputs
         anchors, anchor_points, n_anchors_list, stride_tensor = \
                generate_anchors(feats, self.fpn_strides, self.grid_cell_size, self.grid_cell_offset, device=feats[0].device)
    
-        assert pred_scores.type() == pred_distri.type()
+        assert pred_scores.type() == pred_distri.type() == pred_dim.type() == pred_orient.type() == pred_conf.type()
         gt_bboxes_scale = torch.full((1,4), self.ori_img_size).type_as(pred_scores)
         batch_size = pred_scores.shape[0]
 
         # targets
         targets =self.preprocess(targets, batch_size, gt_bboxes_scale)
         gt_labels = targets[:, :, :1]
-        gt_bboxes = targets[:, :, 1:] #xyxy
+        gt_bboxes = targets[:, :, 1:5] #xyxy
+        gt_dims = targets[:, :, 5:8]
+        gt_orients = targets[:, :, 16:20]
+        gt_confs = targets[:, :, 20:22]
         mask_gt = (gt_bboxes.sum(-1, keepdim=True) > 0).float()
         
         # pboxes
@@ -84,13 +90,19 @@ class ComputeLoss:
                         mask_gt,
                         pred_bboxes.detach() * stride_tensor)
             else:
-                target_labels, target_bboxes, target_scores, fg_mask = \
+                target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs, fg_mask = \
                     self.formal_assigner(
                         pred_scores.detach(),
                         pred_bboxes.detach() * stride_tensor,
+                        pred_dim.detach(),
+                        pred_orient.detach(),
+                        pred_conf.detach(),
                         anchor_points,
                         gt_labels,
                         gt_bboxes,
+                        gt_dims,
+                        gt_orients,
+                        gt_confs,
                         mask_gt)
 
         except RuntimeError:
@@ -162,24 +174,34 @@ class ComputeLoss:
         # bbox loss
         loss_iou, loss_dfl = self.bbox_loss(pred_distri, pred_bboxes, anchor_points_s, target_bboxes,
                                             target_scores, target_scores_sum, fg_mask)
-        
+
+        loss_dim = self.dimloss(pred_dim, target_dims, fg_mask)
+        loss_conf = self.confloss(pred_conf, target_confs, fg_mask)
+        loss_orient = self.orientation_loss(pred_orient, target_orients, target_confs, fg_mask)
+
         loss = self.loss_weight['class'] * loss_cls + \
                self.loss_weight['iou'] * loss_iou + \
-               self.loss_weight['dfl'] * loss_dfl
+               self.loss_weight['dfl'] * loss_dfl + \
+               torch.tensor(0.6).cuda()*loss_dim + loss_conf + torch.tensor(0.4).cuda()*loss_orient
        
         return loss, \
             torch.cat(((self.loss_weight['iou'] * loss_iou).unsqueeze(0), 
                          (self.loss_weight['dfl'] * loss_dfl).unsqueeze(0),
-                         (self.loss_weight['class'] * loss_cls).unsqueeze(0))).detach()
+                         (self.loss_weight['class'] * loss_cls).unsqueeze(0),
+                            loss_dim.unsqueeze(0),
+                            loss_conf.unsqueeze(0),
+                            loss_orient.unsqueeze(0))).detach()
      
     def preprocess(self, targets, batch_size, scale_tensor):
-        targets_list = np.zeros((batch_size, 1, 5)).tolist()
+        targets_list = np.zeros((batch_size, 1, 25)).tolist()
+        # target_list 比 target 多两个全0行
         for i, item in enumerate(targets.cpu().numpy().tolist()):
             targets_list[int(item[0])].append(item[1:])
         max_len = max((len(l) for l in targets_list))
-        targets = torch.from_numpy(np.array(list(map(lambda l:l + [[-1,0,0,0,0]]*(max_len - len(l)), targets_list)))[:,1:,:]).to(targets.device)
+        # 这一步是为了补全batch_szie的样本数量一致,如果缺少了,就用-1, 0, ..., 0补全
+        targets = torch.from_numpy(np.array(list(map(lambda l:l + [[-1,0,0,0,0] + [0]*20]*(max_len - len(l)), targets_list)))[:,1:,:]).to(targets.device)
         batch_target = targets[:, :, 1:5].mul_(scale_tensor)
-        targets[..., 1:] = xywh2xyxy(batch_target)
+        targets[..., 1:5] = xywh2xyxy(batch_target)
         return targets
 
     def bbox_decode(self, anchor_points, pred_dist):
@@ -187,6 +209,64 @@ class ComputeLoss:
             batch_size, n_anchors, _ = pred_dist.shape
             pred_dist = F.softmax(pred_dist.view(batch_size, n_anchors, 4, self.reg_max + 1), dim=-1).matmul(self.proj.to(pred_dist.device))
         return dist2bbox(pred_dist, anchor_points)
+
+    def dimloss(self, pred_dim, target_dims, fg_mask):
+        num_pos = fg_mask.sum()
+        if num_pos > 0:
+            dim_mask = fg_mask.unsqueeze(-1).repeat([1, 1, 3])
+            pred_dims_pos = torch.masked_select(pred_dim,
+                                                  dim_mask).reshape([-1, 3])
+            target_dims_pos = torch.masked_select(
+                                                target_dims, dim_mask).reshape([-1, 3])
+            loss_dim = self.dim_loss(pred_dims_pos.float(), target_dims_pos.float())
+        else:
+            loss_dim = pred_dim.sum() * 0
+
+        return loss_dim
+
+    def confloss(self, pred_conf, target_confs, fg_mask):
+        num_pos = fg_mask.sum()
+        if num_pos > 0:
+            conf_mask = fg_mask.unsqueeze(-1).repeat([1, 1, 2])
+            pred_confs_pos = torch.masked_select(pred_conf,
+                                                conf_mask).reshape([-1, 2])
+            target_confs_pos = torch.masked_select(
+                target_confs, conf_mask).reshape([-1, 2])
+            loss_conf = self.conf_loss(pred_confs_pos, target_confs_pos)
+        else:
+            loss_conf = pred_conf.sum() * 0
+
+        return loss_conf
+
+    def orientation_loss(self, pred_orient, target_orients, target_confs, fg_mask):
+        num_pos = fg_mask.sum()
+        if num_pos > 0:
+            orient_mask = fg_mask.unsqueeze(-1).repeat([1, 1, 4])
+            pred_orient_pos = torch.masked_select(pred_orient,
+                                                orient_mask).reshape([-1, 2, 2])
+            target_orients_pos = torch.masked_select(
+                                target_orients, orient_mask).reshape([-1, 2, 2])
+
+            conf_mask = fg_mask.unsqueeze(-1).repeat([1, 1, 2])
+            target_confs_pos = torch.masked_select(
+                target_confs, conf_mask).reshape([-1, 2])
+
+            _, select_orint_idx = torch.max(target_confs_pos, 1)
+            select_pred_orient = torch.zeros(pred_orient_pos.shape[0], 2).to(pred_orient_pos.device)
+            select_target_orient = torch.zeros(pred_orient_pos.shape[0], 2).to(pred_orient_pos.device)
+            for i in range(len(pred_orient_pos)):
+                select_pred_orient[i, :] =  pred_orient_pos[i, select_orint_idx[i]]
+                select_target_orient[i, :] = target_orients_pos[i, select_orint_idx[i]]
+
+            pred_angle_diff = torch.atan2(select_pred_orient[:, 1], select_pred_orient[:, 0])
+            target_angle_diff = torch.atan2(select_target_orient[:, 1], select_target_orient[:, 0])
+
+            loss_orient = -1* torch.cos(target_angle_diff - pred_angle_diff).mean()
+
+        else:
+            loss_orient = pred_orient.sum() * 0
+
+        return loss_orient.to(torch.float64)
 
 
 class VarifocalLoss(nn.Module):

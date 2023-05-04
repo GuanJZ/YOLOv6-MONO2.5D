@@ -161,17 +161,17 @@ class TrainValDataset(Dataset):
             labels[:, [1, 3]] = labels[:, [1, 3]].clip(0, w - 1e-3)  # x1, x2
             labels[:, [2, 4]] = labels[:, [2, 4]].clip(0, h - 1e-3)  # y1, y2
 
-            boxes = np.copy(labels[:, 1:])
+            boxes = np.copy(labels[:, 1:5])
             boxes[:, 0] = ((labels[:, 1] + labels[:, 3]) / 2) / w  # x center
             boxes[:, 1] = ((labels[:, 2] + labels[:, 4]) / 2) / h  # y center
             boxes[:, 2] = (labels[:, 3] - labels[:, 1]) / w  # width
             boxes[:, 3] = (labels[:, 4] - labels[:, 2]) / h  # height
-            labels[:, 1:] = boxes
+            labels[:, 1:5] = boxes
 
         if self.augment:
             img, labels = self.general_augment(img, labels)
 
-        labels_out = torch.zeros((len(labels), 6))
+        labels_out = torch.zeros((len(labels), 26))
         if len(labels):
             labels_out[:, 1:] = torch.from_numpy(labels)
 
@@ -585,7 +585,7 @@ class TrainValDataset(Dataset):
             )
             if labels:
                 for label in labels:
-                    c, x1, y1, x2, y2 = label[0, 4, 5, 6, 7]
+                    c, x1, y1, x2, y2 = label[0], label[4], label[5], label[6], label[7]
                     cls_id = int(c)
                     w = max(0, x2 - x1)
                     h = max(0, y2 - y1)
@@ -660,10 +660,10 @@ class TrainValDataset(Dataset):
             self.average_dims[i]["ave"] = self.average_dims[i]["total"] / (self.average_dims[i]["count"] + 1e-6)
             self.average_dims[i]["hwl"] = np.array(self.average_dims[i]["hwl"])
 
+        labels = list(labels)
         # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H, W, L, X, Y, Z, ry)
         # to
         # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H_diff, W_diff, L_diff, X, Y, Z, ry, H_ave, W_ave, L_ave)
-        labels = list(labels)
         for idx, label in enumerate(labels):
             ave_dims = np.zeros((label.shape[0], 3))
             for i in range(len(label)):
@@ -756,13 +756,20 @@ class TrainValDataset(Dataset):
         # (type_id, truncated, occluded, alpha,xc, yc, w, h, H_diff, W_diff, L_diff, X, Y, Z, ry, H_ave, W_ave, L_ave)
         # to
         # (type_id, truncated, occluded, alpha, xc, yc, w, h, H_diff, W_diff, L_diff, X, Y, Z, ry, H_ave, W_ave, L_ave, theta_ray, cos, sin, confidence)
-        labels_new = []
+        labels_tmp = []
         for label, theta, orientation, confidence in zip(labels, theta_rays, orientations, confidences):
-            labels_new.append(
+            labels_tmp.append(
                 np.concatenate((label, theta, orientation.reshape(-1, self.bins*2), confidence), axis=1)
             )
 
-        return tuple(labels_new)
+        labels_final = []
+        for idx, label in enumerate(labels_tmp):
+            tmp = label[:, 1:4]
+            label = np.delete(label, [1, 2, 3], axis=1)
+            labels_final.append(np.concatenate((label, tmp), axis=1))
+
+
+        return tuple(labels_final)
 
 
         # return labels tuple(ndarray)
