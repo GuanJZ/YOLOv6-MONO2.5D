@@ -394,11 +394,6 @@ class TrainValDataset(Dataset):
             f"{self.task}: Final numbers of valid images: {len(img_paths)}/ labels: {len(labels)}. "
         )
 
-        # 这里处理一下labels, 得到average/diff HWL, angle_bin, cos sin.
-        # function: 3D_Attributes_preprocess
-        # self.3D_Attributes_preprocess(img_paths, labels) -> labels, self.averageClassDims
-
-        labels = self.attributes_3d_preprocess(img_paths, labels)
 
         return img_paths, labels
 
@@ -524,23 +519,18 @@ class TrainValDataset(Dataset):
                         x.split() for x in f.read().strip().splitlines() if len(x)
                     ]
 
-                    # 将 type 转换成 class_id
-                    for idx in range(len(labels)):
-                        labels[idx][0] = cls_n_dict[labels[idx][0]]
-
-                    # 得到 ndarrsy labels
                     labels = np.array(labels, dtype=np.float32)
 
                 if len(labels):
                     assert all(
-                        len(l) == 15 for l in labels
+                        len(l) == 25 for l in labels
                     ), f"{lb_path}: wrong label format."
                     assert (
-                        labels[:, [0, 1, 2, 4, 5, 6, 7, 8, 9, 10]] >= 0
+                        labels[:, [0, 1, 2, 3, 4, 12, 13, 14, 22, 23]] >= 0
                     ).all(), f"{lb_path}: Label values error: all values in label file must > 0"
-                    # assert (
-                    #     labels[:, 4:8] <= 1
-                    # ).all(), f"{lb_path}: Label values error: all coordinates must be normalized"
+                    assert (
+                        labels[:, 1:5] <= 1
+                    ).all(), f"{lb_path}: Label values error: all coordinates must be normalized"
 
                     _, indices = np.unique(labels, axis=0, return_index=True)
                     if len(indices) < len(labels):  # duplicate row check
@@ -585,7 +575,13 @@ class TrainValDataset(Dataset):
             )
             if labels:
                 for label in labels:
-                    c, x1, y1, x2, y2 = label[0], label[4], label[5], label[6], label[7]
+                    c, x, y, w, h = label[:5]
+                    # convert x,y,w,h to x1,y1,x2,y2
+                    x1 = (x - w / 2) * img_w
+                    y1 = (y - h / 2) * img_h
+                    x2 = (x + w / 2) * img_w
+                    y2 = (y + h / 2) * img_h
+                    # cls_id starts from 0
                     cls_id = int(c)
                     w = max(0, x2 - x1)
                     h = max(0, y2 - y1)
