@@ -171,7 +171,7 @@ class TrainValDataset(Dataset):
         if self.augment:
             img, labels = self.general_augment(img, labels)
 
-        labels_out = torch.zeros((len(labels), 26))
+        labels_out = torch.zeros((len(labels), 22))
         if len(labels):
             labels_out[:, 1:] = torch.from_numpy(labels)
 
@@ -304,24 +304,15 @@ class TrainValDataset(Dataset):
         if "label_hash" not in cache_info or cache_info["label_hash"] != label_hash:
             self.check_labels = True
 
-        self.cls_na_dict = {}
-        for idx, cn in enumerate(self.class_names):
-            self.cls_na_dict[cn] = idx
-        check_class_names = [self.cls_na_dict for _ in range(len(img_paths))]
-
         if self.check_labels:
             cache_info["label_hash"] = label_hash
             nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # number corrupt, messages
             LOGGER.info(
                 f"{self.task}: Checking formats of labels with {NUM_THREADS} process(es): "
             )
-            cls_n_dict = {}
-            for idx, cn in enumerate(self.class_names):
-                cls_n_dict[cn] = idx
-            check_class_names = [cls_n_dict for _ in range(len(img_paths))]
             with Pool(NUM_THREADS) as pool:
                 pbar = pool.imap(
-                    TrainValDataset.check_label_files, zip(check_class_names, img_paths, label_paths)
+                    TrainValDataset.check_label_files, zip(img_paths, label_paths)
                 )
                 pbar = tqdm(pbar, total=len(label_paths)) if self.main_process else pbar
                 for (
@@ -509,7 +500,7 @@ class TrainValDataset(Dataset):
 
     @staticmethod
     def check_label_files(args):
-        cls_n_dict, img_path, lb_path = args
+        img_path, lb_path = args
         nm, nf, ne, nc, msg = 0, 0, 0, 0, ""  # number (missing, found, empty, message
         try:
             if osp.exists(lb_path):
@@ -523,10 +514,10 @@ class TrainValDataset(Dataset):
 
                 if len(labels):
                     assert all(
-                        len(l) == 25 for l in labels
+                        len(l) == 21 for l in labels
                     ), f"{lb_path}: wrong label format."
                     assert (
-                        labels[:, [0, 1, 2, 3, 4, 12, 13, 14, 22, 23]] >= 0
+                        labels[:, [0, 1, 2, 3, 4, 16, 17, 18, 19]] >= 0
                     ).all(), f"{lb_path}: Label values error: all values in label file must > 0"
                     assert (
                         labels[:, 1:5] <= 1

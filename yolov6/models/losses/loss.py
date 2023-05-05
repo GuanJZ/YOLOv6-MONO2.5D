@@ -71,8 +71,8 @@ class ComputeLoss:
         gt_labels = targets[:, :, :1]
         gt_bboxes = targets[:, :, 1:5] #xyxy
         gt_dims = targets[:, :, 5:8]
-        gt_orients = targets[:, :, 16:20]
-        gt_confs = targets[:, :, 20:22]
+        gt_orients = targets[:, :, 12:16]
+        gt_confs = targets[:, :, 16:18]
         mask_gt = (gt_bboxes.sum(-1, keepdim=True) > 0).float()
         
         # pboxes
@@ -193,13 +193,13 @@ class ComputeLoss:
                             loss_orient.unsqueeze(0))).detach()
      
     def preprocess(self, targets, batch_size, scale_tensor):
-        targets_list = np.zeros((batch_size, 1, 25)).tolist()
+        targets_list = np.zeros((batch_size, 1, 21)).tolist()
         # target_list 比 target 多两个全0行
         for i, item in enumerate(targets.cpu().numpy().tolist()):
             targets_list[int(item[0])].append(item[1:])
         max_len = max((len(l) for l in targets_list))
         # 这一步是为了补全batch_szie的样本数量一致,如果缺少了,就用-1, 0, ..., 0补全
-        targets = torch.from_numpy(np.array(list(map(lambda l:l + [[-1,0,0,0,0] + [0]*20]*(max_len - len(l)), targets_list)))[:,1:,:]).to(targets.device)
+        targets = torch.from_numpy(np.array(list(map(lambda l:l + [[-1,0,0,0,0] + [0]*16]*(max_len - len(l)), targets_list)))[:,1:,:]).to(targets.device)
         batch_target = targets[:, :, 1:5].mul_(scale_tensor)
         targets[..., 1:5] = xywh2xyxy(batch_target)
         return targets
