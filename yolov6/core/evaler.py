@@ -41,7 +41,8 @@ class Evaler:
                  do_coco_metric=True,
                  do_pr_metric=False,
                  plot_curve=True,
-                 plot_confusion_matrix=False
+                 plot_confusion_matrix=False,
+                 do_3d=False
                  ):
         assert do_pr_metric or do_coco_metric, 'ERROR: at least set one val metric'
         self.data = data
@@ -62,6 +63,7 @@ class Evaler:
         self.do_pr_metric = do_pr_metric
         self.plot_curve = plot_curve
         self.plot_confusion_matrix = plot_confusion_matrix
+        self.do_3d = do_3d
 
     def init_model(self, model, weights, task):
         if task != 'train':
@@ -106,6 +108,10 @@ class Evaler:
         self.speed_result = torch.zeros(4, device=self.device)
         pred_results = []
         pbar = tqdm(dataloader, desc=f"Inferencing model in {task} datasets.", ncols=NCOLS)
+
+        if self.do_3d:
+            # 3d predicts
+            preds_3d, labels_3d, img_paths = [], [], []
 
         # whether to compute metric and plot PR curve and P、R、F1 curve under iou50 match rule
         if self.do_pr_metric:
@@ -201,11 +207,11 @@ class Evaler:
 
                 # 3. alpha
                 orint, conf = predn[:, 9:13], predn[:, 13:]
-                _, conf_idx = torch.max(conf, dim=1)
+                _, conf_idxs = torch.max(conf, dim=1)
                 alpha = torch.zeros(conf.shape[0])
-                for i, orient_idx in enumerate(conf_idx):
-                    cos, sin = orint[i, orient_idx], orint[i, orient_idx+1]
-                    alpha[i] = torch.atan2(sin, cos) + (orient_idx + 0.5) * torch.pi
+                for enum, orient_idx in enumerate(conf_idxs):
+                    cos, sin = orint[enum, orient_idx], orint[enum, orient_idx+1]
+                    alpha[enum] = torch.atan2(sin, cos) + (orient_idx + 0.5) * torch.pi
                 # 4. Ry
                 Ry = theta_ray + alpha
 
@@ -241,19 +247,46 @@ class Evaler:
                     from yolov6.utils.metrics import process_batch
                     # get correct, matches0.5
                     correct, matches50 = process_batch(predn_processed, labelsn, iouv)
-                    # predn3d
-                    # from predn [xyxy, conf, cls, (H, W, L), Ry]
-                    # to
-                    # [xyxy, conf, cls, (H, W, L), Ry, (X, Y, Z)]
-                    predn_3d = torch.zeros((matches50.shape[0], 13))
-                    for i, m in enumerate(matches50):
-                        predn_3d[i] = torch.cat((predn_processed[int(m[1]), None], labelsn[int(m[0]), None, 8:11]), dim=1)
 
                     if self.plot_confusion_matrix:
                         confusion_matrix.process_batch(predn_processed, labelsn)
 
+                    if self.do_3d:
+                        # predn3d
+                        # from predn [xyxy, conf, cls, (H, W, L), Ry]
+                        # to
+                        # (ndarray)[cls, 0, 0, 0, x1, y1, x2, y2, H, W, L, X, Y, Z, Ry, conf]
+                        predn_3d = np.zeros((matches50.shape[0], 16))
+                        predn_arr = predn_processed.numpy()
+                        labelsn_arr = labelsn.numpy()
+                        for enum, m in enumerate(matches50):
+                            predn_3d[enum, 0] = predn_arr[int(m[1]), 5]
+                            predn_3d[enum, 4:8] = predn_arr[int(m[1]), :4]
+                            predn_3d[enum, 8:11] = predn_arr[int(m[1]), 6:9]
+                            predn_3d[enum, 11:14] = labelsn_arr[int(m[0]), 8:11]
+                            predn_3d[enum, 14] = predn_arr[int(m[1]), 9]
+                            predn_3d[enum, 15] = predn_arr[int(m[1]), 4]
+                        preds_3d.append(predn_3d)
+
+                        # labelsn_3d
+                        # from labelsn (cls, xyxy, HWL, XYZ, Ry)
+                        # to
+                        # (ndarray)[cls, 0, 0, 0, x1, y1, x2, y2, H, W, L, X, Y, Z, Ry]
+                        labelsn_3d = np.zeros((labelsn.shape[0], 15))
+                        labelsn_3d[:, 0] = labelsn[:, 0]
+                        labelsn_3d[:, 4:8] = labelsn[:, 1:5]
+                        labelsn_3d[:, 8:11] = labelsn[:, 5:8]
+                        labelsn_3d[:, 11:] = labelsn[:, 8:]
+
+                        labels_3d.append(labelsn_3d)
+                        img_paths.append(paths[si])
+
                 # Append statistics (correct, conf, pcls, tcls)
                 stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
+
+        if self.do_3d:
+            from yolov6.utils.show_2d3d_box import show_2d3d_box
+            show_2d3d_box(preds_3d[:10], img_paths[:10], self.data["names"])
 
         if self.do_pr_metric:
             # Compute statistics
