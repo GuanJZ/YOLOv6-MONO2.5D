@@ -126,6 +126,10 @@ class Detect(nn.Module):
         else:
             cls_score_list = []
             reg_dist_list = []
+            dim_diff_list = []
+            orient_diff_list = []
+            conf_list = []
+
             anchor_points, stride_tensor = generate_anchors(
                 x, self.stride, self.grid_cell_size, self.grid_cell_offset, device=x[0].device, is_eval=True, mode='af')
 
@@ -135,21 +139,39 @@ class Detect(nn.Module):
                 x[i] = self.stems[i](x[i])
                 cls_x = x[i]
                 reg_x = x[i]
+                dim_x = x[i]
+                orient_x = x[i]
+                conf_x = x[i]
+
                 cls_feat = self.cls_convs[i](cls_x)
                 cls_output = self.cls_preds[i](cls_feat)
                 reg_feat = self.reg_convs[i](reg_x)
                 reg_output = self.reg_preds[i](reg_feat)
+                dim_feat = self.dim_convs[i](dim_x)
+                dim_output = self.dim_preds[i](dim_feat)
+                orient_feat = self.orient_convs[i](orient_x)
+                orient_output = self.orient_preds[i](orient_feat)
+                conf_feat = self.conf_convs[i](conf_x)
+                conf_output = self.conf_preds[i](conf_feat)
 
                 if self.use_dfl:
                     reg_output = reg_output.reshape([-1, 4, self.reg_max + 1, l]).permute(0, 2, 1, 3)
                     reg_output = self.proj_conv(F.softmax(reg_output, dim=1))
 
                 cls_output = torch.sigmoid(cls_output)
+                conf_output = torch.sigmoid(conf_output)
+
                 cls_score_list.append(cls_output.reshape([b, self.nc, l]))
                 reg_dist_list.append(reg_output.reshape([b, 4, l]))
+                dim_diff_list.append(dim_output.flatten(2).permute((0, 2, 1)))
+                orient_diff_list.append(orient_output.flatten(2).permute((0, 2, 1)))
+                conf_list.append(conf_output.flatten(2).permute((0, 2, 1)))
 
             cls_score_list = torch.cat(cls_score_list, axis=-1).permute(0, 2, 1)
             reg_dist_list = torch.cat(reg_dist_list, axis=-1).permute(0, 2, 1)
+            dim_diff_list = torch.cat(dim_diff_list, axis=1)
+            orient_diff_list = torch.cat(orient_diff_list, axis=1)
+            conf_list = torch.cat(conf_list, axis=1)
 
 
             pred_bboxes = dist2bbox(reg_dist_list, anchor_points, box_format='xywh')
@@ -158,7 +180,10 @@ class Detect(nn.Module):
                 [
                     pred_bboxes,
                     torch.ones((b, pred_bboxes.shape[1], 1), device=pred_bboxes.device, dtype=pred_bboxes.dtype),
-                    cls_score_list
+                    cls_score_list,
+                    dim_diff_list,
+                    orient_diff_list,
+                    conf_list
                 ],
                 axis=-1)
 

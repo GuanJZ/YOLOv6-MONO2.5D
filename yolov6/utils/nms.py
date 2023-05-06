@@ -44,8 +44,8 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
          list of detections, echo item is one tensor with shape (num_boxes, 6), 6 is for [xyxy, conf, cls].
     """
 
-    num_classes = prediction.shape[2] - 5  # number of classes
-    pred_candidates = torch.logical_and(prediction[..., 4] > conf_thres, torch.max(prediction[..., 5:], axis=-1)[0] > conf_thres)  # candidates
+    num_classes = prediction.shape[2] - 5 -3 - 4 - 2 # number of classes
+    pred_candidates = torch.logical_and(prediction[..., 4] > conf_thres, torch.max(prediction[..., 5:-9], axis=-1)[0] > conf_thres)  # candidates
     # Check the parameters.
     assert 0 <= conf_thres <= 1, f'conf_thresh must be in 0.0 to 1.0, however {conf_thres} is provided.'
     assert 0 <= iou_thres <= 1, f'iou_thres must be in 0.0 to 1.0, however {iou_thres} is provided.'
@@ -57,7 +57,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     multi_label &= num_classes > 1  # multiple labels per box
 
     tik = time.time()
-    output = [torch.zeros((0, 6), device=prediction.device)] * prediction.shape[0]
+    output = [torch.zeros((0, 15), device=prediction.device)] * prediction.shape[0]
     for img_idx, x in enumerate(prediction):  # image index, image inference
         x = x[pred_candidates[img_idx]]  # confidence
 
@@ -73,11 +73,11 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
 
         # Detections matrix's shape is  (n,6), each row represents (xyxy, conf, cls)
         if multi_label:
-            box_idx, class_idx = (x[:, 5:] > conf_thres).nonzero(as_tuple=False).T
-            x = torch.cat((box[box_idx], x[box_idx, class_idx + 5, None], class_idx[:, None].float()), 1)
+            box_idx, class_idx = (x[:, 5:-9] > conf_thres).nonzero(as_tuple=False).T
+            x = torch.cat((box[box_idx], x[box_idx, class_idx + 5, None], class_idx[:, None].float(), x[box_idx, -9:]), 1)
         else:  # Only keep the class with highest scores.
-            conf, class_idx = x[:, 5:].max(1, keepdim=True)
-            x = torch.cat((box, conf, class_idx.float()), 1)[conf.view(-1) > conf_thres]
+            conf, class_idx = x[:, 5:-9].max(1, keepdim=True)
+            x = torch.cat((box, conf, class_idx.float(), x[box_idx, :-9]), 1)[conf.view(-1) > conf_thres]
 
         # Filter by class, only keep boxes whose category is in classes.
         if classes is not None:

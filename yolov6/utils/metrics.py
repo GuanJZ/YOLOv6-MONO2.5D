@@ -152,7 +152,7 @@ def process_batch(detections, labels, iouv):
         correct (Array[N, 10]), for 10 IoU levels
     """
     correct = np.zeros((detections.shape[0], iouv.shape[0])).astype(bool)
-    iou = general.box_iou(labels[:, 1:], detections[:, :4])
+    iou = general.box_iou(labels[:, 1:5], detections[:, :4])
     correct_class = labels[:, 0:1] == detections[:, 5]
     for i in range(len(iouv)):
         x = torch.where((iou >= iouv[i]) & correct_class)  # IoU > threshold and classes match
@@ -163,8 +163,10 @@ def process_batch(detections, labels, iouv):
                 matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                 # matches = matches[matches[:, 2].argsort()[::-1]]
                 matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+                if iouv[i] == 0.5:
+                    matches50 = torch.tensor(matches.copy())
             correct[matches[:, 1].astype(int), i] = True
-    return torch.tensor(correct, dtype=torch.bool, device=iouv.device)
+    return torch.tensor(correct, dtype=torch.bool, device=iouv.device), matches50
 
 class ConfusionMatrix:
     # Updated version of https://github.com/kaanakan/object_detection_confusion_matrix
@@ -187,7 +189,7 @@ class ConfusionMatrix:
         detections = detections[detections[:, 4] > self.conf]
         gt_classes = labels[:, 0].int()
         detection_classes = detections[:, 5].int()
-        iou = general.box_iou(labels[:, 1:], detections[:, :4])
+        iou = general.box_iou(labels[:, 1:5], detections[:, :4])
 
         x = torch.where(iou > self.iou_thres)
         if x[0].shape[0]:

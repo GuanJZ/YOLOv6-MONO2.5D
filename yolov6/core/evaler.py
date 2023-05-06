@@ -157,6 +157,10 @@ class Evaler:
             # This code is based on
             # https://github.com/ultralytics/yolov5/blob/master/val.py
             for si, pred in enumerate(eval_outputs):
+                # labels
+                # (0: type_id,  1: xc, 2: yc, 3: w, 4: h, 5: H_diff, 6: W_diff, 7: L_diff,
+                #  8: X, 9: Y, 10: Z, 11: ry, 12, 14: cos, 13, 15: sin, 16, 17: confidence,
+                #  18:truncated, 19: occluded, 20: alpha,)
                 labels = targets[targets[:, 0] == si, 1:]
                 nl = len(labels)
                 tcls = labels[:, 0].tolist() if nl else []  # target class
@@ -171,6 +175,46 @@ class Evaler:
                 predn = pred.clone()
                 self.scale_coords(imgs[si].shape[1:], predn[:, :4], shapes[si][0], shapes[si][1])  # native-space pred
 
+                # TODOs: predn
+                # from ([xyxy, conf, cls, (H_diff, W_diff, L_diff), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)])
+                # to
+                # [xyxy, conf, cls, (H, W, L), Ry]
+
+                # 1. predn += HWL_ave
+                # from ([xyxy, conf, cls, (H_diff, W_diff, L_diff), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)])
+                # to
+                # [xyxy, conf, cls, (H, W, L), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)]
+
+                HWL_ave = torch.tensor(np.loadtxt(os.path.join(os.path.dirname(self.data.get(task)), f"{task}_ave_HWL.txt")))
+                for idx, hwl_ave in enumerate(HWL_ave):
+                    predn[predn[:, 5] == idx, 6:9] += hwl_ave[1:]
+
+                # 2. theta_ray
+                img_width = shapes[si][0][1]
+                intrinsic_path = paths[si].replace("images", "calibs").replace("jpg", "txt")
+                with open(intrinsic_path, 'r')as f:
+                    parse_file = f.read().strip().splitlines()
+                    for line in parse_file:
+                        if line is not None and line.split()[0] == "P2:":
+                            proj_matrix = np.array(line.split()[1:], dtype=np.float32).reshape(3, 4)
+                theta_ray = self.calc_theta_ray(img_width, predn[:, :4], proj_matrix)
+
+                # 3. alpha
+                orint, conf = predn[:, 9:13], predn[:, 13:]
+                _, conf_idx = torch.max(conf, dim=1)
+                alpha = torch.zeros(conf.shape[0])
+                for i, orient_idx in enumerate(conf_idx):
+                    cos, sin = orint[i, orient_idx], orint[i, orient_idx+1]
+                    alpha[i] = torch.atan2(sin, cos) + (orient_idx + 0.5) * torch.pi
+                # 4. Ry
+                Ry = theta_ray + alpha
+
+                # predn
+                # from [xyxy, conf, cls, (H, W, L), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)]
+                # to
+                # [xyxy, conf, cls, (H, W, L), Ry]
+                predn_processed = torch.cat((predn[:, :9], Ry[:, None]), dim=1)
+
                 # Assign all predictions as incorrect
                 correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool)
                 if nl:
@@ -184,13 +228,29 @@ class Evaler:
 
                     self.scale_coords(imgs[si].shape[1:], tbox, shapes[si][0], shapes[si][1])  # native-space labels
 
-                    labelsn = torch.cat((labels[:, 0:1], tbox), 1)  # native-space labels
+                    # labelsn
+                    # from (cls, xyxy, HWL_diff, XYZ, Ry)
+                    # to
+                    # (cls, xyxy, HWL, XYZ, Ry)
+                    labelsn = torch.cat((labels[:, 0:1], tbox, labels[:, 5:12]), 1)  # native-space labels
+                    HWL_ave = torch.tensor(
+                        np.loadtxt(os.path.join(os.path.dirname(self.data.get(task)), f"{task}_ave_HWL.txt")))
+                    for idx, hwl_ave in enumerate(HWL_ave):
+                        labelsn[labelsn[:, 0] == idx, 5:8] += hwl_ave[1:]
 
                     from yolov6.utils.metrics import process_batch
+                    # get correct, matches0.5
+                    correct, matches50 = process_batch(predn_processed, labelsn, iouv)
+                    # predn3d
+                    # from predn [xyxy, conf, cls, (H, W, L), Ry]
+                    # to
+                    # [xyxy, conf, cls, (H, W, L), Ry, (X, Y, Z)]
+                    predn_3d = torch.zeros((matches50.shape[0], 13))
+                    for i, m in enumerate(matches50):
+                        predn_3d[i] = torch.cat((predn_processed[int(m[1]), None], labelsn[int(m[0]), None, 8:11]), dim=1)
 
-                    correct = process_batch(predn, labelsn, iouv)
                     if self.plot_confusion_matrix:
-                        confusion_matrix.process_batch(predn, labelsn)
+                        confusion_matrix.process_batch(predn_processed, labelsn)
 
                 # Append statistics (correct, conf, pcls, tcls)
                 stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
@@ -328,6 +388,18 @@ class Evaler:
             pre_time, inf_time, nms_time = 1000 * self.speed_result[1:].cpu().numpy() / n_samples
             for n, v in zip(["pre-process", "inference", "NMS"],[pre_time, inf_time, nms_time]):
                 LOGGER.info("Average {} time: {:.2f} ms".format(n, v))
+    def calc_theta_ray(self, width, box_2d, proj_matrix):
+        fovx = 2 * np.arctan(width / (2 * proj_matrix[0, 0]))
+        center = (box_2d[:, 2] + box_2d[:, 0]) / 2
+        dx = center - (width / 2)
+
+        mult = np.ones(dx.shape)
+        mult[dx < 0] = -1
+        dx = np.abs(dx)
+        angle = np.arctan((2 * dx * np.tan(fovx / 2)) / width)
+        angle = angle * mult
+
+        return angle
 
     def box_convert(self, x):
         '''Convert boxes with shape [n, 4] from [x1, y1, x2, y2] to [x, y, w, h] where x1y1=top-left, x2y2=bottom-right.'''
