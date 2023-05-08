@@ -286,7 +286,8 @@ class Evaler:
 
         if self.do_3d:
             from yolov6.utils.show_2d3d_box import show_2d3d_box
-            show_2d3d_box(preds_3d[:10], img_paths[:10], self.data["names"])
+            LOGGER.info("writing 3D BBoxes")
+            show_2d3d_box(preds_3d[:20], img_paths[:20], self.data["names"])
 
         if self.do_pr_metric:
             # Compute statistics

@@ -182,7 +182,7 @@ class ComputeLoss:
         loss = self.loss_weight['class'] * loss_cls + \
                self.loss_weight['iou'] * loss_iou + \
                self.loss_weight['dfl'] * loss_dfl + \
-               torch.tensor(0.6).cuda()*loss_dim + loss_conf + torch.tensor(0.4).cuda()*loss_orient
+               loss_dim + loss_conf + loss_orient
        
         return loss, \
             torch.cat(((self.loss_weight['iou'] * loss_iou).unsqueeze(0), 

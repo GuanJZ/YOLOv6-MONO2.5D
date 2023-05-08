@@ -17,7 +17,7 @@ class_ids = {}
 for class_id, class_name in enumerate(class_names):
     class_ids[class_name] = float(class_id)
 
-convert_type = "MONO_3D"
+convert_type = "MONO_2D"
 
 bins, overlap = 2, 0.1
 
@@ -230,13 +230,14 @@ def main(args):
     for task in TASK:
         raw_labels_path = f"{root}/{task}"
         imgs_path = raw_labels_path.replace("labels_raw", "images")
-        new_labels_path = raw_labels_path.replace("labels_raw", "labels_yolo")
+        new_labels_path = raw_labels_path.replace("labels_raw", f"labels_yolo_{convert_type}")
         if os.path.exists(new_labels_path):
             shutil.rmtree(new_labels_path)
         os.makedirs(new_labels_path)
 
         raw_labels_list = sorted(os.listdir(raw_labels_path))
         if convert_type == "MONO_2D":
+            print(f"{convert_type}")
             for raw_label in tqdm(raw_labels_list):
                 raw_label_path = os.path.join(raw_labels_path, raw_label)
                 convert_label2yolo(raw_label_path, new_labels_path, raw_label, imgs_path)
@@ -260,6 +261,7 @@ def main(args):
                     labels.append(np.array(label, dtype=np.float32))
                     image_paths.append(os.path.join(imgs_path, raw_label.replace("txt", "jpg")))
             labels = attributes_3d_preprocess(image_paths, labels, task, imgs_path)
+            print("saving ...")
             for im_path, lb in tqdm(zip(image_paths, labels)):
                 lb_name = osp.basename(im_path).replace("jpg", "txt")
                 np.savetxt(osp.join(new_labels_path, lb_name), lb, delimiter=" ", fmt='%.08f')
@@ -270,7 +272,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rope3d_path', default='/share/wuweiguan_dataset/mini_rope3d/labels_raw')
+    parser.add_argument('--rope3d_path', default='/share/wuweiguan_dataset/Rope3D/labels_raw')
     args = parser.parse_args()
     print(args)
 
