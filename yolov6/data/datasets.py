@@ -509,6 +509,13 @@ class TrainValDataset(Dataset):
                     labels = [
                         x.split() for x in f.read().strip().splitlines() if len(x)
                     ]
+                    labels = [
+                        [float(lb) for lb in lbs] for lbs in labels
+                    ]
+
+                    labels = [
+                       lbs  for lbs in labels if abs(lbs[8]) >= 1e-6 and abs(lbs[9]) >= 1e-6 and abs(lbs[10]) >= 1e-6
+                    ]
 
                     labels = np.array(labels, dtype=np.float32)
 
