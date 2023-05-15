@@ -25,7 +25,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names
     """
 
     # Sort by objectness
-    i = np.argsort(-conf)
+    i = np.argsort(-conf) # 按照得分从大到小排序
     tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
 
     # Find unique classes
@@ -142,6 +142,30 @@ def plot_mc_curve(px, py, save_dir='mc_curve.png', names=(), xlabel='Confidence'
     plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
     fig.savefig(Path(save_dir), dpi=250)
 
+def process_batch_3d(detections, labels, iouv):
+    """
+    Return correct predictions matrix. Both sets of boxes are in (x1, y1, x2, y2) format.
+    Arguments:
+        detections (Array[N, 6]), x1, y1, x2, y2, conf, class
+        labels (Array[M, 5]), class, x1, y1, x2, y2
+    Returns:
+        correct (Array[N, 10]), for 10 IoU levels
+    """
+    correct = np.zeros((detections.shape[0], iouv.shape[0])).astype(bool)
+    iou = general.box_iou(labels[:, 4:8], detections[:, 4:8])
+    correct_class = labels[:, 0:1] == detections[:, 0]
+    for i in range(len(iouv)):
+        x = torch.where((iou >= iouv[i]) & correct_class)  # IoU > threshold and classes match
+        if x[0].shape[0]:
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()  # [label, detect, iou]
+            if x[0].shape[0] > 1:
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                # matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+            correct[matches[:, 1].astype(int), i] = True
+    return torch.tensor(correct, dtype=torch.bool, device=iouv.device)
+
 def process_batch(detections, labels, iouv):
     """
     Return correct predictions matrix. Both sets of boxes are in (x1, y1, x2, y2) format.
@@ -154,6 +178,7 @@ def process_batch(detections, labels, iouv):
     correct = np.zeros((detections.shape[0], iouv.shape[0])).astype(bool)
     iou = general.box_iou(labels[:, 1:5], detections[:, :4])
     correct_class = labels[:, 0:1] == detections[:, 5]
+    matches50 = None
     for i in range(len(iouv)):
         x = torch.where((iou >= iouv[i]) & correct_class)  # IoU > threshold and classes match
         if x[0].shape[0]:

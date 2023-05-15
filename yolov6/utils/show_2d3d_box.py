@@ -9,15 +9,11 @@ import yaml
 from pyquaternion import Quaternion
 import shutil
 
-color_list = {'car': (0, 0, 255),
-              'truck': (0, 255, 255),
-              'van': (255, 0, 255),
-              'bus': (255, 255, 0),
-              'cyclist': (0, 128, 128),
-              'motorcyclist': (128, 0, 128),
-              'tricyclist': (128, 128, 0),
-              'pedestrian': (0, 128, 255),
-              'barrow': (255, 0, 128)}
+color_list = {'pedestrian': (0, 0, 255),
+              'cyclist': (0, 255, 255),
+              'car': (255, 0, 255),
+              'big_vehicle': (255, 255, 0)
+              }
 
 class Data:
     """ class Data """
@@ -92,8 +88,6 @@ def detect_data(pred, class_names):
         t_data.X = float(fields[11])  # X [m]
         t_data.Y = float(fields[12])  # Y [m]
         t_data.Z = float(fields[13])  # Z [m]
-        if t_data.X == 0 and t_data.Y == 0 and t_data.Z == 0:
-            continue
         t_data.yaw = float(fields[14])  # yaw angle [rad]
         if len(fields) >= 16:
           t_data.score = float(fields[15])  # detection score
@@ -230,22 +224,23 @@ def project_3d_world(p2, de_center_in_world, w3d, h3d, l3d, ry3d, camera2world):
     verts3d = np.array(verts3d)
     return verts3d
 
-def show_2d3d_box(preds, img_paths, class_names):
+def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
     """
     preds_3d: list(ndarray)
     labels_3d: list(ndarray)
     img_paths: list(ndarray)
     """
 
-    out_dir = "/home/junzhi/workspace/github/YOLOv6-MONO3D/runs/val/show_3d"
-    if os.path.exists(out_dir):
-        shutil.rmtree(out_dir)
-    os.makedirs(out_dir)
+    out_dir = os.path.join(save_dir, "3D_BBoxes_VIS")
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
 
-    for i, (pred, img_path) in enumerate(zip(preds, img_paths)):
+
+    for i, (pred, label, img_path) in enumerate(zip(preds, labels, img_paths)):
         progress(i, len(img_paths))
 
         result = detect_data(pred, class_names)
+        target = detect_data(label, class_names)
 
         name = os.path.basename(img_path)
         calib_file = img_path.replace("images", "calibs").replace("jpg", "txt")
@@ -265,8 +260,8 @@ def show_2d3d_box(preds, img_paths, class_names):
             if t.obj_type not in color_list.keys():
                 continue
             color_type = color_list[t.obj_type]
-            cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
-                          (255, 255, 255), 1)
+            # cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
+            #               (255, 255, 255), 1)
             if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05: #invalid annotation
                 continue
 
@@ -292,4 +287,44 @@ def show_2d3d_box(preds, img_paths, class_names):
             cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), color_type, 2)
             cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), color_type, 2)
             cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), color_type, 2)
+            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (0, 0, 0), 1)
+            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (0, 0, 0), 1)
+
+        for target_index in range(len(target)):
+            t = target[target_index]
+            if t.score < thresh:
+                continue
+            if t.obj_type not in color_list.keys():
+                continue
+            color_type = color_list[t.obj_type]
+            # cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
+            #               (255, 255, 255), 1)
+            if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05:  # invalid annotation
+                continue
+
+            cam_bottom_center = [t.X, t.Y, t.Z]  # bottom center in Camera coordinate
+
+            bottom_center_in_world = camera2world * np.matrix(cam_bottom_center + [1.0]).T
+            verts3d = project_3d_world(p2, bottom_center_in_world, t.w, t.h, t.l, t.yaw, camera2world)
+
+            if verts3d is None:
+                continue
+            verts3d = verts3d.astype(np.int32)
+
+            # draw projection
+            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[1]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[0]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[3]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[3]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[7]), tuple(verts3d[4]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[4]), tuple(verts3d[5]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[5]), tuple(verts3d[6]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[6]), tuple(verts3d[7]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[7]), tuple(verts3d[3]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (255, 255, 255), 1)
+            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (255, 255, 255), 1)
+
         cv2.imwrite('%s/%s.jpg' % (out_dir, name), img)

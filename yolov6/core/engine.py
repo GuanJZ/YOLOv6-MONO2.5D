@@ -41,6 +41,7 @@ class Trainer:
 
         if args.resume:
             self.ckpt = torch.load(args.resume, map_location='cpu')
+            self.resume_path = args.resume.split("/")[-3] + "/" + args.resume.split("/")[-1]
 
         self.rank = args.rank
         self.local_rank = args.local_rank
@@ -74,6 +75,7 @@ class Trainer:
         self.start_epoch = 0
         #resume
         if hasattr(self, "ckpt"):
+            LOGGER.info(f"Resuming from {self.resume_path} from epoch {self.ckpt['epoch']}")
             resume_state_dict = self.ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
             model.load_state_dict(resume_state_dict, strict=True)  # load
             self.start_epoch = self.ckpt['epoch'] + 1
@@ -269,7 +271,8 @@ class Trainer:
                                         use_dfl=self.cfg.model.head.use_dfl,
                                         reg_max=self.cfg.model.head.reg_max,
                                         iou_type=self.cfg.model.head.iou_type,
-										fpn_strides=self.cfg.model.head.strides)
+										fpn_strides=self.cfg.model.head.strides,
+                                        loss_weight=self.cfg.model.head.loss_weight)
 
         if self.args.fuse_ab:
             self.compute_loss_ab = ComputeLoss_ab(num_classes=self.data_dict['nc'],

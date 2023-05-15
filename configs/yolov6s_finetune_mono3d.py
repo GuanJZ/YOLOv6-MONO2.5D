@@ -37,6 +37,14 @@ model = dict(
             'class': 1.0,
             'dfl': 1.0,
         },
+        loss_weight={
+            'class': 1.0,
+            'iou': 2.5,
+            'dfl': 0.5,
+            'dims': 3.0,
+            'conf': 1.0,
+            'orint': 10.0
+        }
     )
 )
 

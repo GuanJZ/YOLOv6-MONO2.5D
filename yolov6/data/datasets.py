@@ -276,7 +276,7 @@ class TrainValDataset(Dataset):
         base_dir = osp.basename(img_dir)
         if base_dir != "":
             label_dir = osp.join(
-            osp.dirname(osp.dirname(img_dir)), "labels", osp.basename(img_dir)
+            osp.dirname(osp.dirname(img_dir)), "labels_yolo_MONO_3D", osp.basename(img_dir)
             )
             assert osp.exists(label_dir), f"{label_dir} is an invalid directory path!"
         else:
@@ -285,7 +285,7 @@ class TrainValDataset(Dataset):
             for rootdir, dirs, files in os.walk(label_dir):
                 for subdir in dirs:
                     sub_dirs.append(subdir)
-            assert "labels" in sub_dirs, f"Could not find a labels directory!"
+            assert "labels_yolo_MONO_3D" in sub_dirs, f"Could not find a labels directory!"
 
 
         # Look for labels in the save relative dir that the images are in
@@ -325,7 +325,10 @@ class TrainValDataset(Dataset):
                     msg,
                 ) in pbar:
                     if nc_per_file == 0:
-                        img_info[img_path]["labels"] = labels_per_file
+                        if ne_per_file == 1:
+                            img_info.pop(img_path)
+                        else:
+                            img_info[img_path]["labels"] = labels_per_file
                     else:
                         img_info.pop(img_path)
                     nc += nc_per_file
@@ -397,12 +400,13 @@ class TrainValDataset(Dataset):
         imgs, hs, ws, labels = [], [], [], []
         for index in indices:
             img, _, (h, w) = self.load_image(index)
+            # print(self.img_paths[index])
             labels_per_img = self.labels[index]
             imgs.append(img)
             hs.append(h)
             ws.append(w)
             labels.append(labels_per_img)
-        img, labels = mosaic_augmentation(self.img_size, imgs, hs, ws, labels, self.hyp)
+        img, labels = mosaic_augmentation(self.img_size, imgs, hs, ws, labels, self.hyp, self.img_paths, indices)
         return img, labels
 
     def general_augment(self, img, labels):
@@ -514,7 +518,7 @@ class TrainValDataset(Dataset):
                     ]
 
                     labels = [
-                       lbs  for lbs in labels if abs(lbs[8]) >= 1e-6 and abs(lbs[9]) >= 1e-6 and abs(lbs[10]) >= 1e-6
+                       lbs for lbs in labels if abs(lbs[8]) >= 1e-6 and abs(lbs[9]) >= 1e-6 and abs(lbs[10]) >= 1e-6
                     ]
 
                     labels = np.array(labels, dtype=np.float32)

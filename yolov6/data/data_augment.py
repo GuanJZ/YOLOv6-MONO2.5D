@@ -9,6 +9,7 @@ import random
 import cv2
 import numpy as np
 
+import traceback
 
 def augment_hsv(im, hgain=0.5, sgain=0.5, vgain=0.5):
     '''HSV color-space augmentation.'''
@@ -142,7 +143,7 @@ def get_transform_matrix(img_shape, new_shape, degrees, scale, shear, translate)
     return M, s
 
 
-def mosaic_augmentation(img_size, imgs, hs, ws, labels, hyp):
+def mosaic_augmentation(img_size, imgs, hs, ws, labels, hyp, img_paths, indices):
     '''Applies Mosaic augmentation.'''
     assert len(imgs) == 4, "Mosaic augmentation of current version only supports 4 images."
 
@@ -184,7 +185,13 @@ def mosaic_augmentation(img_size, imgs, hs, ws, labels, hyp):
         labels4.append(labels_per_img)
 
     # Concat/clip labels
-    labels4 = np.concatenate(labels4, 0)
+    try:
+        labels4 = np.concatenate(labels4, 0)
+    except Exception as e:
+        for index in indices:
+            print(img_paths[index])
+        traceback.print_exc()
+
     for x in (labels4[:, 1:5]):
         np.clip(x, 0, 2 * s, out=x)
 

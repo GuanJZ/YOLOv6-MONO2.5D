@@ -11,13 +11,12 @@ import os.path as osp
 import cv2
 
 # class_names = ["Pedestrian", "Truck", "Car", "Cyclist", "Misc"]
-class_names = ['trafficcone', 'tricyclist', 'van', 'cyclist', 'unknowns_movable', 'car', 'pedestrian',
-               'unknown_unmovable', 'bus', 'truck', 'barrow', 'motorcyclist']
+class_names = ['pedestrian', 'cyclist', 'car', 'big_vehicle']
 class_ids = {}
 for class_id, class_name in enumerate(class_names):
     class_ids[class_name] = float(class_id)
 
-convert_type = "MONO_2D"
+convert_type = "MONO_3D"
 
 bins, overlap = 2, 0.1
 
@@ -227,6 +226,17 @@ def main(args):
     TASK = ["train", "val"]
     root = args.rope3d_path
 
+    fine2coarse = {}
+    fine2coarse['van'] = 'car'
+    fine2coarse['car'] = 'car'
+    fine2coarse['bus'] = 'big_vehicle'
+    fine2coarse['truck'] = 'big_vehicle'
+    fine2coarse['cyclist'] = 'cyclist'
+    fine2coarse['motorcyclist'] = 'cyclist'
+    fine2coarse['tricyclist'] = 'cyclist'
+    fine2coarse['pedestrian'] = 'pedestrian'
+    fine2coarse['barrow'] = 'pedestrian'
+
     for task in TASK:
         raw_labels_path = f"{root}/{task}"
         imgs_path = raw_labels_path.replace("labels_raw", "images")
@@ -255,10 +265,13 @@ def main(args):
                         x.split() for x in f.read().strip().splitlines() if len(x)
                     ]
 
+                    label_new = []
                     for i, lb in enumerate(label):
-                        label[i][0] = class_ids[lb[0]]
+                        if lb[0] in fine2coarse.keys():
+                            lb[0] = class_ids[fine2coarse[lb[0]]]
+                            label_new.append(lb)
 
-                    labels.append(np.array(label, dtype=np.float32))
+                    labels.append(np.array(label_new, dtype=np.float32))
                     image_paths.append(os.path.join(imgs_path, raw_label.replace("txt", "jpg")))
             labels = attributes_3d_preprocess(image_paths, labels, task, imgs_path)
             print("saving ...")
@@ -273,6 +286,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--rope3d_path', default='/share/wuweiguan_dataset/Rope3D/labels_raw')
+    # parser.add_argument('--rope3d_path',
+    #                     default='/media/junzhi/8e78e258-6a68-4733-8ec2-b837743b11e6/mini_rope3d/labels_raw')
     args = parser.parse_args()
     print(args)
 

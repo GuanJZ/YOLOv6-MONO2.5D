@@ -26,7 +26,11 @@ class ComputeLoss:
                  loss_weight={
                      'class': 1.0,
                      'iou': 2.5,
-                     'dfl': 0.5}
+                     'dfl': 0.5,
+                     'dims': 1.0,
+                     'conf': 1.0,
+                     'orint': 10.0
+                 }
                  ):
         
         self.fpn_strides = fpn_strides
@@ -182,8 +186,10 @@ class ComputeLoss:
         loss = self.loss_weight['class'] * loss_cls + \
                self.loss_weight['iou'] * loss_iou + \
                self.loss_weight['dfl'] * loss_dfl + \
-               loss_dim + loss_conf + loss_orient
-       
+               self.loss_weight['dims'] * loss_dim + \
+               self.loss_weight['conf']*loss_conf + \
+               self.loss_weight['orint']*loss_orient
+
         return loss, \
             torch.cat(((self.loss_weight['iou'] * loss_iou).unsqueeze(0), 
                          (self.loss_weight['dfl'] * loss_dfl).unsqueeze(0),

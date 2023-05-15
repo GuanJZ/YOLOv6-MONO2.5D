@@ -6,6 +6,7 @@ import numpy as np
 import json
 import torch
 import yaml
+import shutil
 from pathlib import Path
 
 from pycocotools.coco import COCO
@@ -42,7 +43,8 @@ class Evaler:
                  do_pr_metric=False,
                  plot_curve=True,
                  plot_confusion_matrix=False,
-                 do_3d=False
+                 do_3d=False,
+                 do_distance=False
                  ):
         assert do_pr_metric or do_coco_metric, 'ERROR: at least set one val metric'
         self.data = data
@@ -64,6 +66,7 @@ class Evaler:
         self.plot_curve = plot_curve
         self.plot_confusion_matrix = plot_confusion_matrix
         self.do_3d = do_3d
+        self.do_distance = do_distance
 
     def init_model(self, model, weights, task):
         if task != 'train':
@@ -112,10 +115,19 @@ class Evaler:
         if self.do_3d:
             # 3d predicts
             preds_3d, labels_3d, img_paths = [], [], []
-
+            save_pred_3d = True
+            if save_pred_3d:
+                pred_3d_save_dir = os.path.join(self.save_dir, "pred_results")
+                if os.path.exists(pred_3d_save_dir):
+                    shutil.rmtree(pred_3d_save_dir)
+                os.makedirs(pred_3d_save_dir)
+            if self.do_distance:
+                stats_distance = []
+                seen_distance = []
+                distance = [[0, 30], [30, 60], [60, 90], [90, 120], [120, 150], [150, 10000]]
         # whether to compute metric and plot PR curve and P、R、F1 curve under iou50 match rule
         if self.do_pr_metric:
-            stats, ap = [], []
+            stats_2d, ap = [], []
             seen = 0
             iouv = torch.linspace(0.5, 0.95, 10)  # iou vector for mAP@0.5:0.95
             niou = iouv.numel()
@@ -174,7 +186,7 @@ class Evaler:
 
                 if len(pred) == 0:
                     if nl:
-                        stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
+                        stats_2d.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
                     continue
 
                 # Predictions
@@ -210,8 +222,9 @@ class Evaler:
                 _, conf_idxs = torch.max(conf, dim=1)
                 alpha = torch.zeros(conf.shape[0])
                 for enum, orient_idx in enumerate(conf_idxs):
-                    cos, sin = orint[enum, orient_idx], orint[enum, orient_idx+1]
-                    alpha[enum] = torch.atan2(sin, cos) + (orient_idx + 0.5) * torch.pi
+                    cos, sin = orint[enum, orient_idx*2], orint[enum, orient_idx*2+1]
+                    # 因为数据预处理将alpha的区间从[-pi, pi]移动到[0, 2*pi], 所以这里还需要再减去pi
+                    alpha[enum] = torch.atan2(sin, cos) + (orient_idx + 0.5 -1) * torch.pi
                 # 4. Ry
                 Ry = theta_ray + alpha
 
@@ -251,12 +264,12 @@ class Evaler:
                     if self.plot_confusion_matrix:
                         confusion_matrix.process_batch(predn_processed, labelsn)
 
-                    if self.do_3d:
+                    if self.do_3d and (matches50 is not None):
                         # predn3d
                         # from predn [xyxy, conf, cls, (H, W, L), Ry]
                         # to
                         # (ndarray)[cls, 0, 0, 0, x1, y1, x2, y2, H, W, L, X, Y, Z, Ry, conf]
-                        predn_3d = np.zeros((matches50.shape[0], 16))
+                        predn_3d = np.zeros((predn_processed.shape[0], 16))
                         predn_arr = predn_processed.numpy()
                         labelsn_arr = labelsn.numpy()
                         for enum, m in enumerate(matches50):
@@ -267,6 +280,10 @@ class Evaler:
                             predn_3d[enum, 14] = predn_arr[int(m[1]), 9]
                             predn_3d[enum, 15] = predn_arr[int(m[1]), 4]
                         preds_3d.append(predn_3d)
+                        save_pred_3d = True
+                        if save_pred_3d:
+                            pred_3d_save_path = os.path.join(pred_3d_save_dir, os.path.basename(paths[si]).replace("jpg", "txt"))
+                            np.savetxt(pred_3d_save_path, predn_3d, delimiter=" ", fmt='%.08f')
 
                         # labelsn_3d
                         # from labelsn (cls, xyxy, HWL, XYZ, Ry)
@@ -281,17 +298,101 @@ class Evaler:
                         labels_3d.append(labelsn_3d)
                         img_paths.append(paths[si])
 
+                        # 按照不同的距离计算指标
+                        if self.do_distance:
+
+                            single_seen_dist = [0]*len(distance)
+                            single_stats_dist = [None]*len(distance)
+                            for dist_idx, dist in enumerate(distance):
+                                single_seen_dist[dist_idx] += 1
+                                iouv = torch.linspace(0.5, 0.95, 10)  # iou vector for mAP@0.5:0.95
+                                niou = iouv.numel()
+                                filter_label_idx = np.all(
+                                    (np.linalg.norm(labelsn_3d[:, 11:14], ord=2, axis=1) >= dist[0],
+                                     np.linalg.norm(labelsn_3d[:, 11:14], ord=2, axis=1) < dist[1]),
+                                    axis=0)
+                                nl_dist = filter_label_idx.sum()
+                                filter_pred_idx = np.all(
+                                    (np.linalg.norm(predn_3d[:, 11:14], ord=2, axis=1) >=dist[0],
+                                     np.linalg.norm(predn_3d[:, 11:14], ord=2, axis=1) <dist[1]),
+                                    axis=0)
+                                np_dist = filter_label_idx.sum()
+
+                                pred_dist = torch.tensor(predn_3d[filter_pred_idx],device=self.device)
+                                label_dist = torch.tensor(labelsn_3d[filter_label_idx],device=self.device)
+                                tcls_dist = list(label_dist[:, 0].cpu())
+                                if np_dist == 0:
+                                    if nl_dist:
+                                        single_stats_dist[dist_idx] = \
+                                            (torch.zeros(0, niou, dtype=torch.bool),
+                                             torch.Tensor(), torch.Tensor(), tcls_dist)
+                                    continue
+
+                                correct_dist = torch.zeros(np_dist, niou, dtype=torch.bool)
+                                if nl_dist:
+                                    from yolov6.utils.metrics import process_batch_3d
+                                    correct_dist = process_batch_3d(pred_dist, label_dist, iouv)
+
+                                single_stats_dist[dist_idx] = (correct_dist.cpu(), pred_dist[:, -1].cpu(), pred_dist[:, 0].cpu(), tcls_dist)
+
+                            seen_distance.append(single_seen_dist)
+                            stats_distance.append(single_stats_dist)
+
                 # Append statistics (correct, conf, pcls, tcls)
-                stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
+                stats_2d.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
 
         if self.do_3d:
             from yolov6.utils.show_2d3d_box import show_2d3d_box
             LOGGER.info("writing 3D BBoxes")
-            show_2d3d_box(preds_3d[:20], img_paths[:20], self.data["names"])
+            show_2d3d_box(preds_3d, labels_3d, img_paths, self.data["names"], self.save_dir)
 
         if self.do_pr_metric:
+
+            if self.do_distance:
+                LOGGER.info("distance metric")
+                stats_distance_spilt = []
+                for x_dist in zip(*stats_distance):
+                    x_dist = [i for i in x_dist if i is not None]
+                    stats_distance_spilt.append([np.concatenate(x, 0) for x in zip(*x_dist)])
+                for dist, stats in zip(distance, stats_distance_spilt):
+                    LOGGER.info(f"\ndistance -- {dist[0]} ~ {dist[1]}:\n")
+                    if len(stats) and stats[0].any():
+
+                        from yolov6.utils.metrics import ap_per_class
+                        p, r, ap, f1, ap_class = ap_per_class(*stats, plot=self.plot_curve, save_dir=self.save_dir,
+                                                              names=model.names)
+                        AP50_F1_max_idx = len(f1.mean(0)) - f1.mean(0)[::-1].argmax() - 1
+                        LOGGER.info(f"IOU 50 best mF1 thershold near {AP50_F1_max_idx / 1000.0}.")
+                        ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
+                        mp, mr, map50, map = p[:, AP50_F1_max_idx].mean(), r[:,
+                                                                           AP50_F1_max_idx].mean(), ap50.mean(), ap.mean()
+                        nt = np.bincount(stats[3].astype(np.int64), minlength=model.nc)  # number of targets per class
+
+                        # Print results
+                        s = ('%-16s' + '%12s' * 7) % (
+                        'Class', 'Images', 'Labels', 'P@.5iou', 'R@.5iou', 'F1@.5iou', 'mAP@.5', 'mAP@.5:.95')
+                        LOGGER.info(s)
+                        pf = '%-16s' + '%12i' * 2 + '%12.3g' * 5  # print format
+                        LOGGER.info(pf % ('all', seen, nt.sum(), mp, mr, f1.mean(0)[AP50_F1_max_idx], map50, map))
+
+                        self.pr_metric_result = (map50, map)
+
+                        # Print results per class
+                        if self.verbose and model.nc > 1:
+                            for i, c in enumerate(ap_class):
+                                LOGGER.info(
+                                    pf % (model.names[c], seen, nt[c], p[i, AP50_F1_max_idx], r[i, AP50_F1_max_idx],
+                                          f1[i, AP50_F1_max_idx], ap50[i], ap[i]))
+
+                        if self.plot_confusion_matrix:
+                            confusion_matrix.plot(save_dir=self.save_dir, names=list(model.names))
+                    else:
+                        LOGGER.info("Calculate metric failed, might check dataset.")
+                        self.pr_metric_result = (0.0, 0.0)
+
             # Compute statistics
-            stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
+            LOGGER.info("2D metric")
+            stats = [np.concatenate(x, 0) for x in zip(*stats_2d)]  # to numpy
             if len(stats) and stats[0].any():
 
                 from yolov6.utils.metrics import ap_per_class
