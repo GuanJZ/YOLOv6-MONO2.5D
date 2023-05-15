@@ -1,0 +1,18 @@
+# COCO 2017 dataset http://cocodataset.org
+#train: /share/wuweiguan_dataset/mini_rope3d/images/train #  images
+#val: /share/wuweiguan_dataset/mini_rope3d/images/train  #  images
+#test: /share/wuweiguan_dataset/mini_rope3d/images/train
+#anno_path: /share/wuweiguan_dataset/mini_rope3d/annotations/instances_train.json
+
+train: data/mini_rope3d/images/train #  images
+val: data/mini_rope3d/images/train  #  images
+test: data/mini_rope3d/images/train
+anno_path: data/mini_rope3d/annotations/instances_train.json
+
+# number of classes
+nc: 4
+# whether it is coco dataset, only coco dataset should be set to True.
+is_coco: False
+
+# class names
+names: ['pedestrian', 'cyclist', 'car', 'big_vehicle']
