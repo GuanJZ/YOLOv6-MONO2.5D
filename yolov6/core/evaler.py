@@ -3,6 +3,7 @@
 import os
 from tqdm import tqdm
 import numpy as np
+import cv2
 import json
 import torch
 import yaml
@@ -193,7 +194,19 @@ class Evaler:
                 predn = pred.clone()
                 self.scale_coords(imgs[si].shape[1:], predn[:, :4], shapes[si][0], shapes[si][1])  # native-space pred
 
-                # TODOs: predn
+                show_nms_output = False
+                if show_nms_output:
+                    nms_save_dir = os.path.join(self.save_dir, "nms_output")
+                    os.makedirs(nms_save_dir, exist_ok=True)
+                    img_nms = cv2.imread(paths[si])
+                    for pnms in predn:
+                        if pnms[4] > 0.00001:
+                            cv2.rectangle(img_nms, (int(pnms[0]), int(pnms[1])), (int(pnms[2]), int(pnms[3])), (0, 0, 255),
+                                          1)
+
+                    cv2.imwrite(os.path.join(nms_save_dir, os.path.basename(paths[si])), img_nms)
+
+                # predn
                 # from ([xyxy, conf, cls, (H_diff, W_diff, L_diff), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)])
                 # to
                 # [xyxy, conf, cls, (H, W, L), Ry]
@@ -257,14 +270,15 @@ class Evaler:
                     for idx, hwl_ave in enumerate(HWL_ave):
                         labelsn[labelsn[:, 0] == idx, 5:8] += hwl_ave[1:]
 
-                    from yolov6.utils.metrics import process_batch
-                    # get correct, matches0.5
-                    correct, matches50 = process_batch(predn_processed, labelsn, iouv)
+                    from yolov6.utils.metrics import process_batch, compute_location
+                    # get correct
+                    correct = process_batch(predn_processed, labelsn, iouv)
 
                     if self.plot_confusion_matrix:
                         confusion_matrix.process_batch(predn_processed, labelsn)
 
-                    if self.do_3d and (matches50 is not None):
+                    if self.do_3d:
+                        matches = compute_location(predn_processed, labelsn)
                         # predn3d
                         # from predn [xyxy, conf, cls, (H, W, L), Ry]
                         # to
@@ -272,13 +286,13 @@ class Evaler:
                         predn_3d = np.zeros((predn_processed.shape[0], 16))
                         predn_arr = predn_processed.numpy()
                         labelsn_arr = labelsn.numpy()
-                        for enum, m in enumerate(matches50):
-                            predn_3d[enum, 0] = predn_arr[int(m[1]), 5]
-                            predn_3d[enum, 4:8] = predn_arr[int(m[1]), :4]
-                            predn_3d[enum, 8:11] = predn_arr[int(m[1]), 6:9]
-                            predn_3d[enum, 11:14] = labelsn_arr[int(m[0]), 8:11]
-                            predn_3d[enum, 14] = predn_arr[int(m[1]), 9]
-                            predn_3d[enum, 15] = predn_arr[int(m[1]), 4]
+                        for enum, m in enumerate(matches):
+                            predn_3d[enum, 0] = predn_arr[int(m[0]), 5]
+                            predn_3d[enum, 4:8] = predn_arr[int(m[0]), :4]
+                            predn_3d[enum, 8:11] = predn_arr[int(m[0]), 6:9]
+                            predn_3d[enum, 11:14] = labelsn_arr[int(m[1]), 8:11]
+                            predn_3d[enum, 14] = predn_arr[int(m[0]), 9]
+                            predn_3d[enum, 15] = predn_arr[int(m[0]), 4]
                         preds_3d.append(predn_3d)
                         save_pred_3d = True
                         if save_pred_3d:
@@ -340,11 +354,6 @@ class Evaler:
 
                 # Append statistics (correct, conf, pcls, tcls)
                 stats_2d.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
-
-        if self.do_3d:
-            from yolov6.utils.show_2d3d_box import show_2d3d_box
-            LOGGER.info("writing 3D BBoxes")
-            show_2d3d_box(preds_3d, labels_3d, img_paths, self.data["names"], self.save_dir)
 
         if self.do_pr_metric:
 
@@ -419,6 +428,15 @@ class Evaler:
 
                 if self.plot_confusion_matrix:
                     confusion_matrix.plot(save_dir=self.save_dir, names=list(model.names))
+
+                if self.do_3d:
+                    from yolov6.utils.show_2d3d_box import show_2d3d_box
+                    # conf_thres = AP50_F1_max_idx/1000.0
+                    conf_thres = 0
+                    final_preds_3d = [pred[pred[:, -1] >= conf_thres] for pred in preds_3d]
+
+                    LOGGER.info("writing 3D BBoxes")
+                    show_2d3d_box(final_preds_3d, labels_3d, img_paths, self.data["names"], self.save_dir)
             else:
                 LOGGER.info("Calculate metric failed, might check dataset.")
                 self.pr_metric_result = (0.0, 0.0)

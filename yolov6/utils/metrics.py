@@ -175,11 +175,14 @@ def process_batch(detections, labels, iouv):
     Returns:
         correct (Array[N, 10]), for 10 IoU levels
     """
+    # shape [detections.shape[0], iouv.shape[0]]
     correct = np.zeros((detections.shape[0], iouv.shape[0])).astype(bool)
+    # shape [labels.shape[0], detections.shape[0]]
     iou = general.box_iou(labels[:, 1:5], detections[:, :4])
+    # shape [labels.shape[0], detections.shape[0]]
     correct_class = labels[:, 0:1] == detections[:, 5]
-    matches50 = None
     for i in range(len(iouv)):
+        # x: tuple(tensor(label_idx), tensor(detection_idx))
         x = torch.where((iou >= iouv[i]) & correct_class)  # IoU > threshold and classes match
         if x[0].shape[0]:
             matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()  # [label, detect, iou]
@@ -188,11 +191,27 @@ def process_batch(detections, labels, iouv):
                 matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
                 # matches = matches[matches[:, 2].argsort()[::-1]]
                 matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-                if iouv[i] == 0.5:
-                    matches50 = matches.copy()
             correct[matches[:, 1].astype(int), i] = True
-    return torch.tensor(correct, dtype=torch.bool, device=iouv.device), matches50
+    return torch.tensor(correct, dtype=torch.bool, device=iouv.device)
 
+def compute_location(detections, labels):
+    """
+    iou>=0.5的情况下,detetcions 匹配到labels,从而得到 detections的location
+    :param detections:
+    :param labels:
+    :return:
+    """
+    iou = general.box_iou(detections[:, :4], labels[:, 1:5])
+    x = torch.where(iou >= 1e-6)
+    matches = None
+    if x[0].shape[0]:
+        matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+        if x[0].shape[0] > 1:
+            matches = matches[matches[:, 2].argsort()[::-1]]
+            matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+            # matches = matches[matches[:, 2].argsort()[::-1]]
+            matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+    return matches
 class ConfusionMatrix:
     # Updated version of https://github.com/kaanakan/object_detection_confusion_matrix
     def __init__(self, nc, conf=0.25, iou_thres=0.45):

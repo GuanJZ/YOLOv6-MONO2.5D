@@ -90,7 +90,7 @@ def detect_data(pred, class_names):
         t_data.Z = float(fields[13])  # Z [m]
         t_data.yaw = float(fields[14])  # yaw angle [rad]
         if len(fields) >= 16:
-          t_data.score = float(fields[15])  # detection score
+          t_data.score = round(float(fields[15]), 2)  # detection score
         else:
           t_data.score = 1
         t_data.detect_id = index
@@ -251,6 +251,7 @@ def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
         camera2world = np.linalg.inv(world2camera).reshape(4, 4)
 
         img = cv2.imread(img_path)
+        H, W, C = img.shape
         thresh = -0.5
 
         for result_index in range(len(result)):
@@ -260,8 +261,12 @@ def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
             if t.obj_type not in color_list.keys():
                 continue
             color_type = color_list[t.obj_type]
-            # cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
-            #               (255, 255, 255), 1)
+            cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
+                          color_type, 1)
+            lw = max(round(sum([H, W]) / 2 * 0.003), 2)
+            cv2.putText(img, f"{t.obj_type}:{t.score}",(t.x1, t.y1-2), cv2.FONT_HERSHEY_COMPLEX, \
+                        lw / 4, color_type, thickness = max(lw - 1, 1), lineType=cv2.LINE_AA)
+
             if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05: #invalid annotation
                 continue
 
