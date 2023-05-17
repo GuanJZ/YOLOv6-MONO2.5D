@@ -69,6 +69,8 @@ class Inferer:
         vid_path, vid_writer, windows = None, None, []
         fps_calculator = CalcFPS()
         for img_src, img_path, vid_cap in tqdm(self.files):
+            if "keyframe" not in img_path:
+                continue
             img, img_src = self.precess_image(img_src, self.img_size, self.stride, self.half)
             img = img.to(self.device)
             if len(img.shape) == 3:
@@ -80,10 +82,14 @@ class Inferer:
             t2 = time.time()
 
             # Create output files in nested dirs that mirrors the structure of the images' dirs
-            rel_path = osp.relpath(osp.dirname(img_path), osp.dirname(self.source))
-            save_path = osp.join(save_dir, rel_path, osp.basename(img_path))  # im.jpg
-            txt_path = osp.join(save_dir, rel_path, osp.splitext(osp.basename(img_path))[0])
-            os.makedirs(osp.join(save_dir, rel_path), exist_ok=True)
+            # rel_path = osp.relpath(osp.dirname(img_path), osp.dirname(self.source))
+            save_path = osp.join(save_dir, "detection_vis", osp.basename(img_path))  # im.jpg
+            coco_txt_path = osp.join(save_dir, "coco_detection_results", osp.splitext(osp.basename(img_path))[0])
+            kitti_txt_path = osp.join(save_dir, "kitti_detection_results", osp.splitext(osp.basename(img_path))[0])
+
+            os.makedirs(osp.join(save_dir, "detection_vis"), exist_ok=True)
+            os.makedirs(osp.join(save_dir, "coco_detection_results"), exist_ok=True)
+            os.makedirs(osp.join(save_dir, "kitti_detection_results"), exist_ok=True)
 
             gn = torch.tensor(img_src.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             img_ori = img_src.copy()
@@ -97,9 +103,13 @@ class Inferer:
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (self.box_convert(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf)
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                        coco_line = (cls, *xywh, conf)
+                        with open(coco_txt_path + '.txt', 'a') as f:
+                            f.write(('%g ' * len(coco_line)).rstrip() % coco_line + '\n')
+
+                        kitti_line = (self.class_names[int(cls)], *(["0"] * 3), *[str(float(i)) for i in xyxy], *(["0"] * 7), str(round(float(conf), 3)))
+                        with open(kitti_txt_path + '.txt', 'a') as f:
+                            f.write(" ".join(kitti_line)+'\n')
 
                     if save_img:
                         class_num = int(cls)  # integer class

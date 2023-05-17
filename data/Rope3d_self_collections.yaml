@@ -1,0 +1,21 @@
+# COCO 2017 dataset http://cocodataset.org
+train: /share/wuweiguan_dataset/coco128/images/train2017 # 128 images
+val: /share/wuweiguan_dataset/coco128/images/train2017  # 128 images
+test: /share/wuweiguan_dataset/coco128/images/train2017
+anno_path: /share/wuweiguan_dataset/coco128/annotations/instances_train2017.json
+
+
+#train: /media/junzhi/8e78e258-6a68-4733-8ec2-b837743b11e6/coco128/images/train2017 # 128 images
+#val: /media/junzhi/8e78e258-6a68-4733-8ec2-b837743b11e6/coco128/images/train2017  # 128 images
+#test: /media/junzhi/8e78e258-6a68-4733-8ec2-b837743b11e6/coco128/images/train2017
+#anno_path: /media/junzhi/8e78e258-6a68-4733-8ec2-b837743b11e6/coco128/annotations/instances_train2017.json
+
+# number of classes
+nc: 12
+# whether it is coco dataset, only coco dataset should be set to True.
+is_coco: False
+
+# class names
+#names:
+names: ['trafficcone', 'tricyclist', 'van', 'cyclist', 'unknowns_movable', 'car', 'pedestrian',
+  'unknown_unmovable', 'bus', 'truck', 'barrow', 'motorcyclist']
