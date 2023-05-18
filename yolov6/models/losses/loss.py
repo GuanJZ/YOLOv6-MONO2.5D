@@ -49,7 +49,7 @@ class ComputeLoss:
         self.iou_type = iou_type
         self.varifocal_loss = VarifocalLoss().cuda()
         self.bbox_loss = BboxLoss(self.num_classes, self.reg_max, self.use_dfl, self.iou_type).cuda()
-        self.dim_loss = nn.MSELoss().cuda()
+        self.dim_loss = nn.L1Loss().cuda()
         self.conf_loss = nn.CrossEntropyLoss().cuda()
 
         self.loss_weight = loss_weight       
@@ -224,7 +224,7 @@ class ComputeLoss:
                                                   dim_mask).reshape([-1, 3])
             target_dims_pos = torch.masked_select(
                                                 target_dims, dim_mask).reshape([-1, 3])
-            loss_dim = self.dim_loss(pred_dims_pos.float(), target_dims_pos.float())
+            loss_dim = self.dim_loss(pred_dims_pos, target_dims_pos.log())
         else:
             loss_dim = pred_dim.sum() * 0
 

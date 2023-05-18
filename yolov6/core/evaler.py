@@ -216,9 +216,10 @@ class Evaler:
                 # to
                 # [xyxy, conf, cls, (H, W, L), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)]
 
-                HWL_ave = torch.tensor(np.loadtxt(os.path.join(os.path.dirname(self.data.get(task)), f"{task}_ave_HWL.txt")))
-                for idx, hwl_ave in enumerate(HWL_ave):
-                    predn[predn[:, 5] == idx, 6:9] += hwl_ave[1:]
+                # HWL_ave = torch.tensor(np.loadtxt(os.path.join(os.path.dirname(self.data.get(task)), f"{task}_ave_HWL.txt")))
+                # for idx, hwl_ave in enumerate(HWL_ave):
+                #     predn[predn[:, 5] == idx, 6:9] += hwl_ave[1:]
+                predn[:, 6:9] = np.exp(predn[:, 6:9])
 
                 # 2. theta_ray
                 img_width = shapes[si][0][1]
@@ -265,10 +266,10 @@ class Evaler:
                     # to
                     # (cls, xyxy, HWL, XYZ, Ry)
                     labelsn = torch.cat((labels[:, 0:1], tbox, labels[:, 5:12]), 1)  # native-space labels
-                    HWL_ave = torch.tensor(
-                        np.loadtxt(os.path.join(os.path.dirname(self.data.get(task)), f"{task}_ave_HWL.txt")))
-                    for idx, hwl_ave in enumerate(HWL_ave):
-                        labelsn[labelsn[:, 0] == idx, 5:8] += hwl_ave[1:]
+                    # HWL_ave = torch.tensor(
+                    #     np.loadtxt(os.path.join(os.path.dirname(self.data.get(task)), f"{task}_ave_HWL.txt")))
+                    # for idx, hwl_ave in enumerate(HWL_ave):
+                    #     labelsn[labelsn[:, 0] == idx, 5:8] += hwl_ave[1:]
 
                     from yolov6.utils.metrics import process_batch, compute_location
                     # get correct
@@ -431,8 +432,8 @@ class Evaler:
 
                 if self.do_3d:
                     from yolov6.utils.show_2d3d_box import show_2d3d_box
-                    # conf_thres = AP50_F1_max_idx/1000.0
-                    conf_thres = 0
+                    conf_thres = AP50_F1_max_idx/1000.0
+                    # conf_thres = 0
                     final_preds_3d = [pred[pred[:, -1] >= conf_thres] for pred in preds_3d]
 
                     LOGGER.info("writing 3D BBoxes")

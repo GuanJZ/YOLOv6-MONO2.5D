@@ -16,7 +16,7 @@ class_ids = {}
 for class_id, class_name in enumerate(class_names):
     class_ids[class_name] = float(class_id)
 
-convert_type = "MONO_3D"
+# convert_type = "MONO_3D"
 
 bins, overlap = 2, 0.1
 
@@ -75,44 +75,44 @@ def attributes_3d_preprocess(img_paths, labels, task, imgs_path):
     #
     # proj_matrix = get_calib(calib_paths)
 
-    # ave HWL
-    average_dims = {}
-    for i in range(len(class_names)):
-        if i not in average_dims.keys():
-            average_dims[i] = {}
-        average_dims[i]["total"] = np.zeros(3)
-        average_dims[i]["count"] = 0
-        average_dims[i]["hwl"] = []
-
-    print("average_dims ...")
-    for label in tqdm(labels):
-        for i in range(len(class_names)):
-            average_dims[i]["total"] += label[label[:, 0] == i][:, 8:11].sum(axis=0)
-            average_dims[i]["count"] += (label[:, 0] == i).sum()
-            average_dims[i]["hwl"].extend(label[label[:, 0] == i][:, 8:11])
-
-    for i in range(len(class_names)):
-        average_dims[i]["ave"] = average_dims[i]["total"] / (average_dims[i]["count"] + 1e-6)
-        average_dims[i]["hwl"] = np.array(average_dims[i]["hwl"])
-
-    dump_ave_HWL = np.zeros((len(class_names), 4))
-    for i in range(len(class_names)):
-        dump_ave_HWL[i, 0] = i
-        dump_ave_HWL[i, 1:] = average_dims[i]["ave"]
-
-    np.savetxt(osp.join(osp.dirname(imgs_path), f"{task}_ave_HWL.txt"), dump_ave_HWL, delimiter=" ", fmt='%.08f')
-
-
-    labels = list(labels)
-    # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H, W, L, X, Y, Z, ry)
-    # to
-    # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H_diff, W_diff, L_diff, X, Y, Z, ry)
-    for idx, label in enumerate(labels):
-        ave_dims = np.zeros((label.shape[0], 3))
-        for i in range(len(label)):
-            label[i, 8:11] -= average_dims[label[i, 0]]["ave"]
-            # ave_dims[i, :] = average_dims[label[i, 0]]["ave"]
-        # labels[idx] = np.concatenate((label, ave_dims), axis=1)
+    # # ave HWL
+    # average_dims = {}
+    # for i in range(len(class_names)):
+    #     if i not in average_dims.keys():
+    #         average_dims[i] = {}
+    #     average_dims[i]["total"] = np.zeros(3)
+    #     average_dims[i]["count"] = 0
+    #     average_dims[i]["hwl"] = []
+    #
+    # print("average_dims ...")
+    # for label in tqdm(labels):
+    #     for i in range(len(class_names)):
+    #         average_dims[i]["total"] += label[label[:, 0] == i][:, 8:11].sum(axis=0)
+    #         average_dims[i]["count"] += (label[:, 0] == i).sum()
+    #         average_dims[i]["hwl"].extend(label[label[:, 0] == i][:, 8:11])
+    #
+    # for i in range(len(class_names)):
+    #     average_dims[i]["ave"] = average_dims[i]["total"] / (average_dims[i]["count"] + 1e-6)
+    #     average_dims[i]["hwl"] = np.array(average_dims[i]["hwl"])
+    #
+    # dump_ave_HWL = np.zeros((len(class_names), 4))
+    # for i in range(len(class_names)):
+    #     dump_ave_HWL[i, 0] = i
+    #     dump_ave_HWL[i, 1:] = average_dims[i]["ave"]
+    #
+    # np.savetxt(osp.join(osp.dirname(imgs_path), f"{task}_ave_HWL.txt"), dump_ave_HWL, delimiter=" ", fmt='%.08f')
+    #
+    #
+    # labels = list(labels)
+    # # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H, W, L, X, Y, Z, ry)
+    # # to
+    # # (type_id, truncated, occluded, alpha, x1, y1, x2, y2, H_diff, W_diff, L_diff, X, Y, Z, ry)
+    # for idx, label in enumerate(labels):
+    #     ave_dims = np.zeros((label.shape[0], 3))
+    #     for i in range(len(label)):
+    #         label[i, 8:11] -= average_dims[label[i, 0]]["ave"]
+    #         # ave_dims[i, :] = average_dims[label[i, 0]]["ave"]
+    #     # labels[idx] = np.concatenate((label, ave_dims), axis=1)
 
 
     # angle_bins
@@ -225,6 +225,7 @@ def attributes_3d_preprocess(img_paths, labels, task, imgs_path):
 def main(args):
     TASK = ["train", "val"]
     root = args.rope3d_path
+    convert_type = args.convert_type
 
     fine2coarse = {}
     fine2coarse['van'] = 'car'
@@ -238,6 +239,7 @@ def main(args):
     fine2coarse['barrow'] = 'pedestrian'
 
     for task in TASK:
+        print(f"{task}")
         raw_labels_path = f"{root}/{task}"
         imgs_path = raw_labels_path.replace("labels_raw", "images")
         new_labels_path = raw_labels_path.replace("labels_raw", f"labels_yolo_{convert_type}")
@@ -273,6 +275,7 @@ def main(args):
 
                     labels.append(np.array(label_new, dtype=np.float32))
                     image_paths.append(os.path.join(imgs_path, raw_label.replace("txt", "jpg")))
+            print(f"{convert_type} ...")
             labels = attributes_3d_preprocess(image_paths, labels, task, imgs_path)
             print("saving ...")
             for im_path, lb in tqdm(zip(image_paths, labels)):
@@ -285,9 +288,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rope3d_path', default='/share/wuweiguan_dataset/Rope3D/labels_raw')
-    # parser.add_argument('--rope3d_path',
-    #                     default='/media/junzhi/8e78e258-6a68-4733-8ec2-b837743b11e6/mini_rope3d/labels_raw')
+    parser.add_argument('--rope3d_path', default='data/Rope3D/labels_raw')
+    # parser.add_argument('--rope3d_path',default='data/mini_rope3d/labels_raw')
+    parser.add_argument('--convert_type', default="MONO_3D")
     args = parser.parse_args()
     print(args)
 
