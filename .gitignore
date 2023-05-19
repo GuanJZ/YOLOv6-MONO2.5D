@@ -117,4 +117,5 @@ venv.bak/
 *.engine
 .idea
 data/coco128.yaml
+data/coco128
 mini_rope3d
