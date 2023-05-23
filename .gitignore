@@ -119,3 +119,4 @@ venv.bak/
 data/coco128.yaml
 data/coco128
 mini_rope3d
+*.cache

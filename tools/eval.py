@@ -48,6 +48,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--config-file', default='', type=str, help='experiments description file, lower priority than reproduce_640_eval')
     parser.add_argument('--do_3d', default=False, type=boolean_string, help='')
     parser.add_argument('--do_distance', default=False, type=boolean_string, help='')
+    parser.add_argument('--val_trt', default=False, type=boolean_string, help='')
     args = parser.parse_args()
 
     if args.config_file:
@@ -119,7 +120,8 @@ def run(data,
         plot_confusion_matrix=False,
         config_file=None,
         do_3d=False,
-        do_distance=False
+        do_distance=False,
+        val_trt=False
         ):
     """ Run the evaluation process
 
@@ -148,12 +150,16 @@ def run(data,
     val = Evaler(data, batch_size, img_size, conf_thres, \
                 iou_thres, device, half, save_dir, \
                 test_load_size, letterbox_return_int, force_no_pad, not_infer_on_rect, scale_exact,
-                verbose, do_coco_metric, do_pr_metric, plot_curve, plot_confusion_matrix, do_3d, do_distance)
-    model = val.init_model(model, weights, task)
+                verbose, do_coco_metric, do_pr_metric, plot_curve, plot_confusion_matrix, do_3d, do_distance,
+                val_trt)
+    if val_trt:
+        model = val.init_engine(weights)
+    else:
+        model = val.init_model(model, weights, task)
+        model.eval()
     dataloader = val.init_data(dataloader, task)
 
     # eval
-    model.eval()
     pred_result, vis_outputs, vis_paths = val.predict_model(model, dataloader, task)
     eval_result = val.eval_model(pred_result, model, dataloader, task)
     return eval_result, vis_outputs, vis_paths
