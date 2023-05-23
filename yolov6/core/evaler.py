@@ -148,7 +148,7 @@ class Evaler:
             niou = iouv.numel()
             if self.plot_confusion_matrix:
                 from yolov6.utils.metrics import ConfusionMatrix
-                confusion_matrix = ConfusionMatrix(nc=model.nc)
+                confusion_matrix = ConfusionMatrix(nc=len(self.model_names))
 
         for i, (imgs, targets, paths, shapes) in enumerate(pbar):
 
