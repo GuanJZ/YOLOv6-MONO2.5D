@@ -41,7 +41,8 @@ class Evaler:
                  do_coco_metric=True,
                  do_pr_metric=False,
                  plot_curve=True,
-                 plot_confusion_matrix=False
+                 plot_confusion_matrix=False,
+                 val_trt=False
                  ):
         assert do_pr_metric or do_coco_metric, 'ERROR: at least set one val metric'
         self.data = data
@@ -62,6 +63,28 @@ class Evaler:
         self.do_pr_metric = do_pr_metric
         self.plot_curve = plot_curve
         self.plot_confusion_matrix = plot_confusion_matrix
+        self.val_trt = val_trt
+        self.model_names = data["names"]
+
+    def init_engine(self, engine):
+        import tensorrt as trt
+        from collections import namedtuple, OrderedDict
+        LOGGER.info("init trt engine ...")
+        Binding = namedtuple('Binding', ('name', 'dtype', 'shape', 'data', 'ptr'))
+        logger = trt.Logger(trt.Logger.ERROR)
+        trt.init_libnvinfer_plugins(logger, namespace="")
+        with open(engine, 'rb') as f, trt.Runtime(logger) as runtime:
+            model = runtime.deserialize_cuda_engine(f.read())
+        bindings = OrderedDict()
+        for index in range(model.num_bindings):
+            name = model.get_binding_name(index)
+            dtype = trt.nptype(model.get_binding_dtype(index))
+            shape = tuple(model.get_binding_shape(index))
+            data = torch.from_numpy(np.empty(shape, dtype=np.dtype(dtype))).to(self.device)
+            bindings[name] = Binding(name, dtype, shape, data, int(data.data_ptr()))
+        binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
+        context = model.create_execution_context()
+        return context, bindings, binding_addrs, model.get_binding_shape(0)[0]
 
     def init_model(self, model, weights, task):
         if task != 'train':
@@ -94,6 +117,7 @@ class Evaler:
             if self.force_no_pad:
                 pad = 0.0
             rect = not self.not_infer_on_rect
+            self.stride = 32
             dataloader = create_dataloader(self.data[task if task in ('train', 'val', 'test') else 'val'],
                                            self.img_size, self.batch_size, self.stride, hyp=eval_hyp, check_labels=True, pad=pad, rect=rect,
                                            data_dict=self.data, task=task)[0]
@@ -106,6 +130,15 @@ class Evaler:
         self.speed_result = torch.zeros(4, device=self.device)
         pred_results = []
         pbar = tqdm(dataloader, desc=f"Inferencing model in {task} datasets.", ncols=NCOLS)
+
+        if self.val_trt:
+            context, bindings, binding_addrs, trt_batch_size = model
+            assert trt_batch_size >= self.batch_size, f'The batch size you set is {self.batch_size}, it must <= tensorrt binding batch size {trt_batch_size}.'
+            tmp = torch.randn(self.batch_size, 3, self.img_size, self.img_size).to(self.device)
+            # warm up for 10 times
+            for _ in range(10):
+                binding_addrs['images'] = int(tmp.data_ptr())
+                context.execute_v2(list(binding_addrs.values()))
 
         # whether to compute metric and plot PR curve and P、R、F1 curve under iou50 match rule
         if self.do_pr_metric:
@@ -122,13 +155,18 @@ class Evaler:
             # pre-process
             t1 = time_sync()
             imgs = imgs.to(self.device, non_blocking=True)
-            imgs = imgs.half() if self.half else imgs.float()
+            imgs = imgs.half() if self.half and not self.val_trt else imgs.float()
             imgs /= 255
             self.speed_result[1] += time_sync() - t1  # pre-process time
 
             # Inference
             t2 = time_sync()
-            outputs, _ = model(imgs)
+            if self.val_trt:
+                binding_addrs['images'] = int(imgs.data_ptr())
+                context.execute_v2(list(binding_addrs.values()))
+                outputs = bindings["outputs"].data
+            else:
+                outputs, _ = model(imgs)
             self.speed_result[2] += time_sync() - t2  # inference time
 
             # post-process
@@ -201,12 +239,12 @@ class Evaler:
             if len(stats) and stats[0].any():
 
                 from yolov6.utils.metrics import ap_per_class
-                p, r, ap, f1, ap_class = ap_per_class(*stats, plot=self.plot_curve, save_dir=self.save_dir, names=model.names)
+                p, r, ap, f1, ap_class = ap_per_class(*stats, plot=self.plot_curve, save_dir=self.save_dir, names=self.model_names)
                 AP50_F1_max_idx = len(f1.mean(0)) - f1.mean(0)[::-1].argmax() -1
                 LOGGER.info(f"IOU 50 best mF1 thershold near {AP50_F1_max_idx/1000.0}.")
                 ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
                 mp, mr, map50, map = p[:, AP50_F1_max_idx].mean(), r[:, AP50_F1_max_idx].mean(), ap50.mean(), ap.mean()
-                nt = np.bincount(stats[3].astype(np.int64), minlength=model.nc)  # number of targets per class
+                nt = np.bincount(stats[3].astype(np.int64), minlength=len(self.model_names))  # number of targets per class
 
                 # Print results
                 s = ('%-16s' + '%12s' * 7) % ('Class', 'Images', 'Labels', 'P@.5iou', 'R@.5iou', 'F1@.5iou', 'mAP@.5', 'mAP@.5:.95')
@@ -217,13 +255,13 @@ class Evaler:
                 self.pr_metric_result = (map50, map)
 
                 # Print results per class
-                if self.verbose and model.nc > 1:
+                if self.verbose and len(self.model_names) > 1:
                     for i, c in enumerate(ap_class):
-                        LOGGER.info(pf % (model.names[c], seen, nt[c], p[i, AP50_F1_max_idx], r[i, AP50_F1_max_idx],
+                        LOGGER.info(pf % (self.model_names[c], seen, nt[c], p[i, AP50_F1_max_idx], r[i, AP50_F1_max_idx],
                                            f1[i, AP50_F1_max_idx], ap50[i], ap[i]))
 
                 if self.plot_confusion_matrix:
-                    confusion_matrix.plot(save_dir=self.save_dir, names=list(model.names))
+                    confusion_matrix.plot(save_dir=self.save_dir, names=list(self.model_names))
             else:
                 LOGGER.info("Calculate metric failed, might check dataset.")
                 self.pr_metric_result = (0.0, 0.0)
@@ -274,7 +312,7 @@ class Evaler:
                 val_dataset_img_count = cocoEval.cocoGt.imgToAnns.__len__()
                 val_dataset_anns_count = 0
                 label_count_dict = {"images":set(), "anns":0}
-                label_count_dicts = [copy.deepcopy(label_count_dict) for _ in range(model.nc)]
+                label_count_dicts = [copy.deepcopy(label_count_dict) for _ in range(len(self.model_names))]
                 for _, ann_i in cocoEval.cocoGt.anns.items():
                     if ann_i["ignore"]:
                         continue
@@ -301,7 +339,7 @@ class Evaler:
                 LOGGER.info(pf % ('all', val_dataset_img_count, val_dataset_anns_count, mp[i], mr[i], mf1[i], map50, map))
 
                 #compute each class best f1 and corresponding p and r
-                for nc_i in range(model.nc):
+                for nc_i in range(len(self.model_names)):
                     coco_p_c = coco_p[:, :, nc_i, 0, 2]
                     map = np.mean(coco_p_c[coco_p_c>-1])
 
@@ -311,11 +349,12 @@ class Evaler:
                     r = np.linspace(.0, 1.00, int(np.round((1.00 - .0) / .01)) + 1, endpoint=True)
                     f1 = 2 * p * r / (p + r + 1e-16)
                     i = f1.argmax()
-                    LOGGER.info(pf % (model.names[nc_i], len(label_count_dicts[nc_i]["images"]), label_count_dicts[nc_i]["anns"], p[i], r[i], f1[i], map50, map))
+                    LOGGER.info(pf % (self.model_names[nc_i], len(label_count_dicts[nc_i]["images"]), label_count_dicts[nc_i]["anns"], p[i], r[i], f1[i], map50, map))
             cocoEval.summarize()
             map, map50 = cocoEval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
             # Return results
-            model.float()  # for training
+            if not self.val_trt:
+                model.float()  # for training
             if task != 'train':
                 LOGGER.info(f"Results saved to {self.save_dir}")
             return (map50, map)

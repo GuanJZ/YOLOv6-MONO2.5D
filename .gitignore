@@ -117,3 +117,6 @@ venv.bak/
 *.engine
 .idea
 data/coco128.yaml
+data/coco128
+data/mini_rope3d
+*.cache

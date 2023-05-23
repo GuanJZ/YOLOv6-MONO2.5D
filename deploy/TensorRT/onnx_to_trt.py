@@ -169,7 +169,7 @@ def main():
     if engine is None:
         raise SystemExit('ERROR: failed to build the TensorRT engine!')
 
-    engine_path = args.model.replace('.onnx', '.trt')
+    engine_path = args.model.replace('.onnx', f'_{args.dtype}_{args.batch_size}.trt')
     if args.dtype == "int8" and not args.qat:
         engine_path = args.model.replace('.onnx', '-int8-{}-{}-minmax.trt'.format(args.batch_size, args.num_calib_batch))
 
