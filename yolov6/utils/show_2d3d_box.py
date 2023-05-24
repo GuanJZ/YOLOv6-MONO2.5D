@@ -235,8 +235,8 @@ def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-
-    for i, (pred, label, img_path) in enumerate(zip(preds, labels, img_paths)):
+    from tqdm import tqdm
+    for i, (pred, label, img_path) in tqdm(enumerate(zip(preds, labels, img_paths))):
         progress(i, len(img_paths))
 
         result = detect_data(pred, class_names)

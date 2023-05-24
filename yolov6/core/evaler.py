@@ -46,7 +46,8 @@ class Evaler:
                  plot_confusion_matrix=False,
                  do_3d=False,
                  do_distance=False,
-                 val_trt=False
+                 val_trt=False,
+                 val_onnx=False
                  ):
         assert do_pr_metric or do_coco_metric, 'ERROR: at least set one val metric'
         self.data = data
@@ -70,12 +71,13 @@ class Evaler:
         self.do_3d = do_3d
         self.do_distance = do_distance
         self.val_trt = val_trt
+        self.val_onnx = val_onnx
         self.model_names = data["names"]
 
     def init_engine(self, engine):
         import tensorrt as trt
         from collections import namedtuple, OrderedDict
-        LOGGER.info("init trt engine ...")
+        LOGGER.info("init TRT engine ...")
         Binding = namedtuple('Binding', ('name', 'dtype', 'shape', 'data', 'ptr'))
         logger = trt.Logger(trt.Logger.ERROR)
         trt.init_libnvinfer_plugins(logger, namespace="")
@@ -90,7 +92,14 @@ class Evaler:
             bindings[name] = Binding(name, dtype, shape, data, int(data.data_ptr()))
         binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
         context = model.create_execution_context()
-        return context, bindings, binding_addrs, model.get_binding_shape(0)[0]
+        return context, bindings, binding_addrs, model.get_binding_shape(0)
+
+    def init_onnx(self, onnx_model):
+        import  onnxruntime
+        LOGGER.info("init ONNX model ...")
+        session = onnxruntime.InferenceSession(onnx_model, None)
+        input_name = session.get_inputs()[0].name
+        return session, input_name
 
     def init_model(self, model, weights, task):
         LOGGER.info("init PyTorch model ...")
@@ -140,13 +149,16 @@ class Evaler:
         pbar = tqdm(dataloader, desc=f"Inferencing model in {task} datasets.", ncols=NCOLS)
 
         if self.val_trt:
-            context, bindings, binding_addrs, trt_batch_size = model
-            assert trt_batch_size >= self.batch_size, f'The batch size you set is {self.batch_size}, it must <= tensorrt binding batch size {trt_batch_size}.'
+            context, bindings, binding_addrs, trt_input_size = model
+            assert trt_input_size[0] >= self.batch_size, f'The batch size you set is {self.batch_size}, it must <= tensorrt binding batch size {trt_batch_size}.'
             tmp = torch.randn(self.batch_size, 3, self.img_size, self.img_size).to(self.device)
             # warm up for 10 times
             for _ in range(10):
                 binding_addrs['images'] = int(tmp.data_ptr())
                 context.execute_v2(list(binding_addrs.values()))
+
+        if self.val_onnx:
+            model, input_name = model
 
         if self.do_3d:
             # 3d predicts
@@ -169,7 +181,7 @@ class Evaler:
             niou = iouv.numel()
             if self.plot_confusion_matrix:
                 from yolov6.utils.metrics import ConfusionMatrix
-                confusion_matrix = ConfusionMatrix(nc=model.nc)
+                confusion_matrix = ConfusionMatrix(nc=len(self.model_names))
 
         for i, (imgs, targets, paths, shapes) in enumerate(pbar):
 
@@ -183,9 +195,12 @@ class Evaler:
             # Inference
             t2 = time_sync()
             if self.val_trt:
+                assert trt_input_size == imgs.shape, f"trt engine input size must be {imgs.shape}"
                 binding_addrs['images'] = int(imgs.data_ptr())
                 context.execute_v2(list(binding_addrs.values()))
                 outputs = bindings["outputs"].data
+            elif self.val_onnx:
+                outputs = torch.tensor(model.run([], {input_name: imgs.cpu().numpy()})[0])
             else:
                 outputs, _ = model(imgs)
             self.speed_result[2] += time_sync() - t2  # inference time
@@ -327,13 +342,14 @@ class Evaler:
                         predn_3d = np.zeros((predn_processed.shape[0], 16))
                         predn_arr = predn_processed.numpy()
                         labelsn_arr = labelsn.numpy()
-                        for enum, m in enumerate(matches):
-                            predn_3d[enum, 0] = predn_arr[int(m[0]), 5]
-                            predn_3d[enum, 4:8] = predn_arr[int(m[0]), :4]
-                            predn_3d[enum, 8:11] = predn_arr[int(m[0]), 6:9]
-                            predn_3d[enum, 11:14] = labelsn_arr[int(m[1]), 8:11]
-                            predn_3d[enum, 14] = predn_arr[int(m[0]), 9]
-                            predn_3d[enum, 15] = predn_arr[int(m[0]), 4]
+                        if matches is not None:
+                            for enum, m in enumerate(matches):
+                                predn_3d[enum, 0] = predn_arr[int(m[0]), 5]
+                                predn_3d[enum, 4:8] = predn_arr[int(m[0]), :4]
+                                predn_3d[enum, 8:11] = predn_arr[int(m[0]), 6:9]
+                                predn_3d[enum, 11:14] = labelsn_arr[int(m[1]), 8:11]
+                                predn_3d[enum, 14] = predn_arr[int(m[0]), 9]
+                                predn_3d[enum, 15] = predn_arr[int(m[0]), 4]
                         preds_3d.append(predn_3d)
                         save_pred_3d = True
                         if save_pred_3d:
@@ -466,6 +482,8 @@ class Evaler:
                     for i, c in enumerate(ap_class):
                         LOGGER.info(pf % (self.model_names[c], seen, nt[c], p[i, AP50_F1_max_idx], r[i, AP50_F1_max_idx],
                                            f1[i, AP50_F1_max_idx], ap50[i], ap[i]))
+                LOGGER.info(f'\nEvaluating speed.')
+                self.eval_speed(task)
 
                 if self.plot_confusion_matrix:
                     confusion_matrix.plot(save_dir=self.save_dir, names=list(self.model_names))
@@ -491,8 +509,6 @@ class Evaler:
         For task val, this function evaluates the speed and mAP by pycocotools, and returns
         inference time and mAP value.
         '''
-        LOGGER.info(f'\nEvaluating speed.')
-        self.eval_speed(task)
 
         if not self.do_coco_metric and self.do_pr_metric:
             return self.pr_metric_result
@@ -588,8 +604,11 @@ class Evaler:
         center = (box_2d[:, 2] + box_2d[:, 0]) / 2
         dx = center - (width / 2)
 
-        mult = np.ones(dx.shape)
-        mult[dx < 0] = -1
+        if dx.shape[0] == 1:
+            mult = -np.ones(dx.shape) if dx[0] < 0 else -np.ones(dx.shape)
+        else:
+            mult = np.ones(dx.shape)
+            mult[dx < 0] = -1
         dx = np.abs(dx)
         angle = np.arctan((2 * dx * np.tan(fovx / 2)) / width)
         angle = angle * mult

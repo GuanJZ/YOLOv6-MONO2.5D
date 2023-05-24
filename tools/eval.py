@@ -48,7 +48,8 @@ def get_args_parser(add_help=True):
     parser.add_argument('--config-file', default='', type=str, help='experiments description file, lower priority than reproduce_640_eval')
     parser.add_argument('--do_3d', default=False, type=boolean_string, help='')
     parser.add_argument('--do_distance', default=False, type=boolean_string, help='')
-    parser.add_argument('--val_trt', default=False, type=boolean_string, help='')
+    parser.add_argument('--val_trt', default=False, action='store_true', help='')
+    parser.add_argument('--val_onnx', default=False, action='store_true', help='')
     args = parser.parse_args()
 
     if args.config_file:
@@ -121,7 +122,8 @@ def run(data,
         config_file=None,
         do_3d=False,
         do_distance=False,
-        val_trt=False
+        val_trt=False,
+        val_onnx=False
         ):
     """ Run the evaluation process
 
@@ -151,9 +153,11 @@ def run(data,
                 iou_thres, device, half, save_dir, \
                 test_load_size, letterbox_return_int, force_no_pad, not_infer_on_rect, scale_exact,
                 verbose, do_coco_metric, do_pr_metric, plot_curve, plot_confusion_matrix, do_3d, do_distance,
-                val_trt)
+                val_trt, val_onnx)
     if val_trt:
         model = val.init_engine(weights)
+    elif val_onnx:
+        model = val.init_onnx(weights)
     else:
         model = val.init_model(model, weights, task)
         model.eval()
