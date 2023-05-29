@@ -35,13 +35,16 @@ def generate_anchors(feats, fpn_strides, grid_cell_size=5.0, grid_cell_offset=0.
             cell_half_size = grid_cell_size * stride * 0.5
             shift_x = (torch.arange(end=w, device=device) + grid_cell_offset) * stride
             shift_y = (torch.arange(end=h, device=device) + grid_cell_offset) * stride
+            # 将图像按照边长为stride像素划分成格子, 并且将格子的坐标表示从左上角移动到中心(grid_cell_size=0.5),
             shift_y, shift_x = torch.meshgrid(shift_y, shift_x)
+            # 计算每个格子的左上角和右下角的像素坐标
             anchor = torch.stack(
                 [
                     shift_x - cell_half_size, shift_y - cell_half_size,
                     shift_x + cell_half_size, shift_y + cell_half_size
                 ],
                 axis=-1).clone().to(feats[0].dtype)
+            # 计算每个格子像素坐标
             anchor_point = torch.stack(
                 [shift_x, shift_y], axis=-1).clone().to(feats[0].dtype)
 

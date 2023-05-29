@@ -61,26 +61,40 @@ class ComputeLoss:
         epoch_num,
         step_num
     ):
-        
+
         feats, pred_scores, pred_distri, pred_dim, pred_orient, pred_conf = outputs
+        """
+        anchors: [8400, 4]
+        anchor_points: [8400, 2]
+        n_anchors_list: [6400, 1600, 400]
+        stride_tensor: [8400, 1]
+        """
         anchors, anchor_points, n_anchors_list, stride_tensor = \
                generate_anchors(feats, self.fpn_strides, self.grid_cell_size, self.grid_cell_offset, device=feats[0].device)
    
         assert pred_scores.type() == pred_distri.type() == pred_dim.type() == pred_orient.type() == pred_conf.type()
+        # gt_bboxes_scale: [640, 640, 640, 640]
         gt_bboxes_scale = torch.full((1,4), self.ori_img_size).type_as(pred_scores)
         batch_size = pred_scores.shape[0]
 
-        # targets
+        """
+        targets
+        batch_size dim=1 对齐
+        xcycwh * 640 -> xyxy
+        """
         targets =self.preprocess(targets, batch_size, gt_bboxes_scale)
         gt_labels = targets[:, :, :1]
         gt_bboxes = targets[:, :, 1:5] #xyxy
         gt_dims = targets[:, :, 5:8]
         gt_orients = targets[:, :, 12:16]
         gt_confs = targets[:, :, 16:18]
-        mask_gt = (gt_bboxes.sum(-1, keepdim=True) > 0).float()
+        mask_gt = (gt_bboxes.sum(-1, keepdim=True) > 0).float() # batch_size dim=1 对齐用0补全的部分mask_gt=0, 其余正常的gt_bboxes的mask_gt=1
         
         # pboxes
-        anchor_points_s = anchor_points / stride_tensor
+        anchor_points_s = anchor_points / stride_tensor # anchor_points从原图变为feature_map
+        """
+        模型预测的是distance[l, t, r, b], distance + anchor_points(grid_cell_center) = xyxy
+        """
         pred_bboxes = self.bbox_decode(anchor_points_s, pred_distri) #xyxy
 
         try:
@@ -175,7 +189,10 @@ class ComputeLoss:
         if target_scores_sum > 0:
         	loss_cls /= target_scores_sum
         
-        # bbox loss
+        """
+        bbox loss
+        在feature map上计算loss
+        """
         loss_iou, loss_dfl = self.bbox_loss(pred_distri, pred_bboxes, anchor_points_s, target_bboxes,
                                             target_scores, target_scores_sum, fg_mask)
 

@@ -135,8 +135,7 @@ class Trainer:
     # Training loop for batchdata
     def train_in_steps(self, epoch_num, step_num):
         # targets
-        #  (0: type_id, 1: xc, 2: yc, 3: w, 4: h, 5: H_diff, 6: W_diff, 7: L_diff, 8: X, 9: Y, 10: Z, 11: ry, 12: H_ave, 13: W_ave,
-        #  14: L_ave, 15: theta_ray, 16, 18: cos, 17, 19: sin, 20, 21: bin_confidence, 22: truncated, 23: occluded, 24: alpha, )
+        #  (0: type_id, 1: xc, 2: yc, 3: w, 4: h, 5: H, 6: W, 7: L, 8: X, 9: Y, 10: Z, 11: ry, 12, 13: cos, 14, 15: sin, 16, 17: bin_confidence, 18: truncated, 19: occluded, 20: alpha, )
         images, targets = self.prepro_data(self.batch_data, self.device)
         # plot train_batch and save to tensorboard once an epoch
         if self.write_trainbatch_tb and self.main_process and self.step == 0:

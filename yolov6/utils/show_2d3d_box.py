@@ -294,6 +294,8 @@ def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
             cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), color_type, 2)
             cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (0, 0, 0), 1)
             cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (0, 0, 0), 1)
+            # cv2.circle(img, tuple(((verts3d[3] + verts3d[2]) / 2).astype(int)), radius=10, color=color_type,
+            #            thickness=-1)
 
         for target_index in range(len(target)):
             t = target[target_index]
@@ -331,5 +333,6 @@ def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
             cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), (255, 255, 255), 1)
             cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (255, 255, 255), 1)
             cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (255, 255, 255), 1)
+            # cv2.circle(img, tuple(((verts3d[3] + verts3d[2])/2).astype(int)), radius=10, color=(255, 255, 255), thickness=-1)
 
         cv2.imwrite('%s/%s.jpg' % (out_dir, name), img)
