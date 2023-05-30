@@ -161,17 +161,22 @@ class TrainValDataset(Dataset):
             labels[:, [1, 3]] = labels[:, [1, 3]].clip(0, w - 1e-3)  # x1, x2
             labels[:, [2, 4]] = labels[:, [2, 4]].clip(0, h - 1e-3)  # y1, y2
 
+            # labels[:, 18] = labels[:, 18].clip(0, w - 1e-3) # keypoint_x
+            # labels[:, 19] = labels[:, 19].clip(0, h - 1e-3) # keypoint_y
+
             boxes = np.copy(labels[:, 1:5])
             boxes[:, 0] = ((labels[:, 1] + labels[:, 3]) / 2) / w  # x center
             boxes[:, 1] = ((labels[:, 2] + labels[:, 4]) / 2) / h  # y center
             boxes[:, 2] = (labels[:, 3] - labels[:, 1]) / w  # width
             boxes[:, 3] = (labels[:, 4] - labels[:, 2]) / h  # height
             labels[:, 1:5] = boxes
+            labels[:, 18] = labels[:, 18] / w
+            labels[:, 19] = labels[:, 19] / h
 
         if self.augment:
             img, labels = self.general_augment(img, labels)
 
-        labels_out = torch.zeros((len(labels), 22))
+        labels_out = torch.zeros((len(labels), 24))
         if len(labels):
             labels_out[:, 1:] = torch.from_numpy(labels)
 
@@ -225,7 +230,7 @@ class TrainValDataset(Dataset):
         valid_img_record = osp.join(
             osp.dirname(img_dir), "." + osp.basename(img_dir) + ".json"
         )
-        NUM_THREADS = min(8, os.cpu_count())
+        NUM_THREADS = min(16, os.cpu_count())
 
         img_paths = glob.glob(osp.join(img_dir, "**/*"), recursive=True)
         img_paths = sorted(
@@ -276,7 +281,7 @@ class TrainValDataset(Dataset):
         base_dir = osp.basename(img_dir)
         if base_dir != "":
             label_dir = osp.join(
-            osp.dirname(osp.dirname(img_dir)), "labels_yolo_MONO_3D", osp.basename(img_dir)
+            osp.dirname(osp.dirname(img_dir)), "labels_yolo_MONO_3D_KEYPOINT", osp.basename(img_dir)
             )
             assert osp.exists(label_dir), f"{label_dir} is an invalid directory path!"
         else:
@@ -285,7 +290,7 @@ class TrainValDataset(Dataset):
             for rootdir, dirs, files in os.walk(label_dir):
                 for subdir in dirs:
                     sub_dirs.append(subdir)
-            assert "labels_yolo_MONO_3D" in sub_dirs, f"Could not find a labels directory!"
+            assert "labels_yolo_MONO_3D_KEYPOINT" in sub_dirs, f"Could not find a labels directory!"
 
 
         # Look for labels in the save relative dir that the images are in
@@ -428,12 +433,15 @@ class TrainValDataset(Dataset):
             img = np.flipud(img)
             if nl:
                 labels[:, 2] = 1 - labels[:, 2]
+                labels[:, 19] = 1 - labels[:, 19]
+
 
         # Flip left-right
         if random.random() < self.hyp["fliplr"]:
             img = np.fliplr(img)
             if nl:
                 labels[:, 1] = 1 - labels[:, 1]
+                labels[:, 18] = 1 - labels[:, 18]
 
         return img, labels
 
@@ -525,7 +533,7 @@ class TrainValDataset(Dataset):
 
                 if len(labels):
                     assert all(
-                        len(l) == 21 for l in labels
+                        len(l) == 23 for l in labels
                     ), f"{lb_path}: wrong label format."
                     assert (
                         labels[:, [0, 1, 2, 3, 4, 16, 17, 18, 19]] >= 0

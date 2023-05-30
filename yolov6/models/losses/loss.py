@@ -29,7 +29,8 @@ class ComputeLoss:
                      'dfl': 0.5,
                      'dims': 1.0,
                      'conf': 1.0,
-                     'orint': 10.0
+                     'orint': 10.0,
+                     'bbcp': 1.0
                  }
                  ):
         
@@ -50,6 +51,7 @@ class ComputeLoss:
         self.varifocal_loss = VarifocalLoss().cuda()
         self.bbox_loss = BboxLoss(self.num_classes, self.reg_max, self.use_dfl, self.iou_type).cuda()
         self.dim_loss = nn.L1Loss().cuda()
+        self.bbcp_loss = nn.L1Loss().cuda()
         self.conf_loss = nn.CrossEntropyLoss().cuda()
 
         self.loss_weight = loss_weight       
@@ -62,7 +64,7 @@ class ComputeLoss:
         step_num
     ):
 
-        feats, pred_scores, pred_distri, pred_dim, pred_orient, pred_conf = outputs
+        feats, pred_scores, pred_distri, pred_dim, pred_orient, pred_conf, pred_bbcp = outputs
         """
         anchors: [8400, 4]
         anchor_points: [8400, 2]
@@ -88,6 +90,7 @@ class ComputeLoss:
         gt_dims = targets[:, :, 5:8]
         gt_orients = targets[:, :, 12:16]
         gt_confs = targets[:, :, 16:18]
+        gt_bbcp = targets[:, :, 18:20]
         mask_gt = (gt_bboxes.sum(-1, keepdim=True) > 0).float() # batch_size dim=1 对齐用0补全的部分mask_gt=0, 其余正常的gt_bboxes的mask_gt=1
         
         # pboxes
@@ -108,7 +111,7 @@ class ComputeLoss:
                         mask_gt,
                         pred_bboxes.detach() * stride_tensor)
             else:
-                target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs, fg_mask = \
+                target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs, target_bbcp, fg_mask = \
                     self.formal_assigner(
                         pred_scores.detach(),
                         pred_bboxes.detach() * stride_tensor,
@@ -121,6 +124,7 @@ class ComputeLoss:
                         gt_dims,
                         gt_orients,
                         gt_confs,
+                        gt_bbcp,
                         mask_gt)
 
         except RuntimeError:
@@ -199,32 +203,37 @@ class ComputeLoss:
         loss_dim = self.dimloss(pred_dim, target_dims, fg_mask)
         loss_conf = self.confloss(pred_conf, target_confs, fg_mask)
         loss_orient = self.orientation_loss(pred_orient, target_orients, target_confs, fg_mask)
+        loss_bbcp = self.bbcploss(pred_bbcp, target_bbcp / stride_tensor - anchor_points_s, fg_mask)
 
         loss = self.loss_weight['class'] * loss_cls + \
                self.loss_weight['iou'] * loss_iou + \
                self.loss_weight['dfl'] * loss_dfl + \
                self.loss_weight['dims'] * loss_dim + \
                self.loss_weight['conf']*loss_conf + \
-               self.loss_weight['orint']*loss_orient
+               self.loss_weight['orint']*loss_orient + \
+               self.loss_weight['bbcp'] * loss_bbcp
 
         return loss, \
             torch.cat(((self.loss_weight['iou'] * loss_iou).unsqueeze(0), 
                          (self.loss_weight['dfl'] * loss_dfl).unsqueeze(0),
                          (self.loss_weight['class'] * loss_cls).unsqueeze(0),
-                            loss_dim.unsqueeze(0),
-                            loss_conf.unsqueeze(0),
-                            loss_orient.unsqueeze(0))).detach()
+                       (self.loss_weight['dims'] * loss_dim).unsqueeze(0),
+                       (self.loss_weight['conf']*loss_conf).unsqueeze(0),
+                       (self.loss_weight['orint']*loss_orient).unsqueeze(0),
+                       (self.loss_weight['bbcp']*loss_bbcp).unsqueeze(0) \
+                       )).detach()
      
     def preprocess(self, targets, batch_size, scale_tensor):
-        targets_list = np.zeros((batch_size, 1, 21)).tolist()
+        targets_list = np.zeros((batch_size, 1, 23)).tolist()
         # target_list 比 target 多两个全0行
         for i, item in enumerate(targets.cpu().numpy().tolist()):
             targets_list[int(item[0])].append(item[1:])
         max_len = max((len(l) for l in targets_list))
         # 这一步是为了补全batch_szie的样本数量一致,如果缺少了,就用-1, 0, ..., 0补全
-        targets = torch.from_numpy(np.array(list(map(lambda l:l + [[-1,0,0,0,0] + [0]*16]*(max_len - len(l)), targets_list)))[:,1:,:]).to(targets.device)
+        targets = torch.from_numpy(np.array(list(map(lambda l:l + [[-1,0,0,0,0] + [0]*18]*(max_len - len(l)), targets_list)))[:,1:,:]).to(targets.device)
         batch_target = targets[:, :, 1:5].mul_(scale_tensor)
         targets[..., 1:5] = xywh2xyxy(batch_target)
+        targets[..., 18:20] = targets[..., 18:20].mul_(torch.full((1,2), self.ori_img_size).type_as(scale_tensor))
         return targets
 
     def bbox_decode(self, anchor_points, pred_dist):
@@ -246,6 +255,20 @@ class ComputeLoss:
             loss_dim = pred_dim.sum() * 0
 
         return loss_dim
+
+    def bbcploss(self, pred_bbcp, target_bbcp, fg_mask):
+        num_pos = fg_mask.sum()
+        if num_pos > 0:
+            bbcp_mask = fg_mask.unsqueeze(-1).repeat([1, 1, 2])
+            pred_bbcp_pos = torch.masked_select(pred_bbcp,
+                                                  bbcp_mask).reshape([-1, 2])
+            target_bbcp_pos = torch.masked_select(
+                                                target_bbcp, bbcp_mask).reshape([-1, 2])
+            loss_bbcp = self.bbcp_loss(pred_bbcp_pos, target_bbcp_pos)
+        else:
+            loss_bbcp = pred_bbcp.sum() * 0
+
+        return loss_bbcp
 
     def confloss(self, pred_conf, target_confs, fg_mask):
         num_pos = fg_mask.sum()

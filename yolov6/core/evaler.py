@@ -232,9 +232,9 @@ class Evaler:
             # https://github.com/ultralytics/yolov5/blob/master/val.py
             for si, pred in enumerate(eval_outputs):
                 # labels
-                # (0: type_id,  1: xc, 2: yc, 3: w, 4: h, 5: H_diff, 6: W_diff, 7: L_diff,
-                #  8: X, 9: Y, 10: Z, 11: ry, 12, 14: cos, 13, 15: sin, 16, 17: confidence,
-                #  18:truncated, 19: occluded, 20: alpha,)
+                # (0: type_id,  1: xc, 2: yc, 3: w, 4: h, 5: H, 6: W, 7: L,
+                #  8: X, 9: Y, 10: Z, 11: ry, 12, 14: cos, 13, 15: sin, 16, 17: confidence, 18: bbcp_x, 19: bbcp_y,
+                #  20:truncated, 21: occluded, 22: alpha)
                 labels = targets[targets[:, 0] == si, 1:]
                 nl = len(labels)
                 tcls = labels[:, 0].tolist() if nl else []  # target class
@@ -262,18 +262,10 @@ class Evaler:
                     cv2.imwrite(os.path.join(nms_save_dir, os.path.basename(paths[si])), img_nms)
 
                 # predn
-                # from ([xyxy, conf, cls, (H_diff, W_diff, L_diff), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)])
+                # from ([xyxy, conf, cls, (H_log, W_log, L_log), ([cos, sin], [cos, sin]), (conf_cos, conf_sin), bbcp_x, bbcp_y])
                 # to
-                # [xyxy, conf, cls, (H, W, L), Ry]
-
-                # 1. predn += HWL_ave
-                # from ([xyxy, conf, cls, (H_diff, W_diff, L_diff), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)])
-                # to
-                # [xyxy, conf, cls, (H, W, L), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)]
-
-                # HWL_ave = torch.tensor(np.loadtxt(os.path.join(os.path.dirname(self.data.get(task)), f"{task}_ave_HWL.txt")))
-                # for idx, hwl_ave in enumerate(HWL_ave):
-                #     predn[predn[:, 5] == idx, 6:9] += hwl_ave[1:]
+                # [xyxy, conf, cls, (H, W, L), Ry, bbcp_x, bbcp_y]
+                # 1. HWL_log -> HWL
                 predn[:, 6:9] = np.exp(predn[:, 6:9])
 
                 # 2. theta_ray
@@ -287,7 +279,7 @@ class Evaler:
                 theta_ray = self.calc_theta_ray(img_width, predn[:, :4], proj_matrix)
 
                 # 3. alpha
-                orint, conf = predn[:, 9:13], predn[:, 13:]
+                orint, conf = predn[:, 9:13], predn[:, 13:15]
                 _, conf_idxs = torch.max(conf, dim=1)
                 alpha = torch.zeros(conf.shape[0])
                 for enum, orient_idx in enumerate(conf_idxs):
@@ -298,10 +290,10 @@ class Evaler:
                 Ry = theta_ray + alpha
 
                 # predn
-                # from [xyxy, conf, cls, (H, W, L), ([cos, sin], [cos, sin]), (conf_cos, conf_sin)]
+                # from ([xyxy, conf, cls, (H_log, W_log, L_log), ([cos, sin], [cos, sin]), (conf_cos, conf_sin), bbcp_x, bbcp_y])
                 # to
-                # [xyxy, conf, cls, (H, W, L), Ry]
-                predn_processed = torch.cat((predn[:, :9], Ry[:, None]), dim=1)
+                # [xyxy, conf, cls, (H, W, L), Ry, bbcp_x, bbcp_y]
+                predn_processed = torch.cat((predn[:, :9], Ry[:, None], predn[:, 15:17]), dim=1)
 
                 # Assign all predictions as incorrect
                 correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool)
@@ -317,14 +309,10 @@ class Evaler:
                     self.scale_coords(imgs[si].shape[1:], tbox, shapes[si][0], shapes[si][1])  # native-space labels
 
                     # labelsn
-                    # from (cls, xyxy, HWL_diff, XYZ, Ry)
+                    # from (cls, xyxy, HWL, XYZ, Ry, bbcp_x, bbcp_y)
                     # to
-                    # (cls, xyxy, HWL, XYZ, Ry)
-                    labelsn = torch.cat((labels[:, 0:1], tbox, labels[:, 5:12]), 1)  # native-space labels
-                    # HWL_ave = torch.tensor(
-                    #     np.loadtxt(os.path.join(os.path.dirname(self.data.get(task)), f"{task}_ave_HWL.txt")))
-                    # for idx, hwl_ave in enumerate(HWL_ave):
-                    #     labelsn[labelsn[:, 0] == idx, 5:8] += hwl_ave[1:]
+                    # (cls, xyxy, HWL, XYZ, Ry, bbcp_x, bbcp_y)
+                    labelsn = torch.cat((labels[:, 0:1], tbox, labels[:, 5:12], labels[:, 18:20]), 1)  # native-space labels
 
                     from yolov6.utils.metrics import process_batch, compute_location
                     # get correct
@@ -336,10 +324,10 @@ class Evaler:
                     if self.do_3d:
                         matches = compute_location(predn_processed, labelsn)
                         # predn3d
-                        # from predn [xyxy, conf, cls, (H, W, L), Ry]
+                        # from predn [xyxy, conf, cls, (H, W, L), Ry, bbcp_x, bbcp_y]
                         # to
-                        # (ndarray)[cls, 0, 0, 0, x1, y1, x2, y2, H, W, L, X, Y, Z, Ry, conf]
-                        predn_3d = np.zeros((predn_processed.shape[0], 16))
+                        # (ndarray)[cls, 0, 0, 0, x1, y1, x2, y2, H, W, L, X, Y, Z, Ry, conf, bbcp_x, bbcp_y]
+                        predn_3d = np.zeros((predn_processed.shape[0], 18))
                         predn_arr = predn_processed.numpy()
                         labelsn_arr = labelsn.numpy()
                         if matches is not None:
@@ -350,6 +338,7 @@ class Evaler:
                                 predn_3d[enum, 11:14] = labelsn_arr[int(m[1]), 8:11]
                                 predn_3d[enum, 14] = predn_arr[int(m[0]), 9]
                                 predn_3d[enum, 15] = predn_arr[int(m[0]), 4]
+                                predn_3d[enum, 16:18] = predn_arr[int(m[0]), 11:13]
                         preds_3d.append(predn_3d)
                         save_pred_3d = True
                         if save_pred_3d:
@@ -357,10 +346,10 @@ class Evaler:
                             np.savetxt(pred_3d_save_path, predn_3d, delimiter=" ", fmt='%.08f')
 
                         # labelsn_3d
-                        # from labelsn (cls, xyxy, HWL, XYZ, Ry)
+                        # from labelsn (cls, xyxy, HWL, XYZ, Ry, bbcp_x, bbcp_y)
                         # to
-                        # (ndarray)[cls, 0, 0, 0, x1, y1, x2, y2, H, W, L, X, Y, Z, Ry]
-                        labelsn_3d = np.zeros((labelsn.shape[0], 15))
+                        # (ndarray)[cls, 0, 0, 0, x1, y1, x2, y2, H, W, L, X, Y, Z, Ry, bbcp_x, bbcp_y]
+                        labelsn_3d = np.zeros((labelsn.shape[0], 17))
                         labelsn_3d[:, 0] = labelsn[:, 0]
                         labelsn_3d[:, 4:8] = labelsn[:, 1:5]
                         labelsn_3d[:, 8:11] = labelsn[:, 5:8]
@@ -404,7 +393,7 @@ class Evaler:
                                     from yolov6.utils.metrics import process_batch_3d
                                     correct_dist = process_batch_3d(pred_dist, label_dist, iouv)
 
-                                single_stats_dist[dist_idx] = (correct_dist.cpu(), pred_dist[:, -1].cpu(), pred_dist[:, 0].cpu(), tcls_dist)
+                                single_stats_dist[dist_idx] = (correct_dist.cpu(), pred_dist[:, 15].cpu(), pred_dist[:, 0].cpu(), tcls_dist)
 
                             seen_distance.append(single_seen_dist)
                             stats_distance.append(single_stats_dist)
@@ -492,7 +481,7 @@ class Evaler:
                     from yolov6.utils.show_2d3d_box import show_2d3d_box
                     conf_thres = AP50_F1_max_idx/1000.0
                     # conf_thres = 0
-                    final_preds_3d = [pred[pred[:, -1] >= conf_thres] for pred in preds_3d]
+                    final_preds_3d = [pred[pred[:, 15] >= conf_thres] for pred in preds_3d]
 
                     LOGGER.info("writing 3D BBoxes")
                     show_2d3d_box(final_preds_3d, labels_3d, img_paths, self.data["names"], self.save_dir)

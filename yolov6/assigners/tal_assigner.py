@@ -31,6 +31,7 @@ class TaskAlignedAssigner(nn.Module):
                 gt_dims,
                 gt_orients,
                 gt_confs,
+                gt_bbcp,
                 mask_gt):
         """This code referenced to
            https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py
@@ -69,8 +70,8 @@ class TaskAlignedAssigner(nn.Module):
             mask_pos, overlaps, self.n_max_boxes)
 
         # assigned target
-        target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs = self.get_targets(
-            gt_labels, gt_bboxes, gt_dims, gt_orients, gt_confs, target_gt_idx, fg_mask)
+        target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs, target_bbcp = self.get_targets(
+            gt_labels, gt_bboxes, gt_dims, gt_orients, gt_confs, gt_bbcp, target_gt_idx, fg_mask)
 
         # normalize
         align_metric *= mask_pos
@@ -79,7 +80,7 @@ class TaskAlignedAssigner(nn.Module):
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).max(-2)[0].unsqueeze(-1)
         target_scores = target_scores * norm_align_metric
 
-        return target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs, fg_mask.bool()
+        return target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs, target_bbcp, fg_mask.bool()
 
     def get_pos_mask(self,
                      pd_scores,
@@ -142,6 +143,7 @@ class TaskAlignedAssigner(nn.Module):
                     gt_dims,
                     gt_orients,
                     gt_confs,
+                    gt_bbcp,
                     target_gt_idx,
                     fg_mask):
 
@@ -155,6 +157,7 @@ class TaskAlignedAssigner(nn.Module):
         target_dims = gt_dims.reshape([-1, 3])[target_gt_idx]
         target_orients = gt_orients.reshape([-1, 4])[target_gt_idx]
         target_confs = gt_confs.reshape([-1, 2])[target_gt_idx]
+        target_bbcp = gt_bbcp.reshape([-1, 2])[target_gt_idx]
 
         # assigned target scores
         target_labels[target_labels<0] = 0
@@ -163,4 +166,4 @@ class TaskAlignedAssigner(nn.Module):
         target_scores = torch.where(fg_scores_mask > 0, target_scores,
                                         torch.full_like(target_scores, 0))
 
-        return target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs
+        return target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs, target_bbcp

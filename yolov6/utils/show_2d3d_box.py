@@ -20,7 +20,7 @@ class Data:
     def __init__(self, obj_type="unset", truncation=-1, occlusion=-1, \
                  obs_angle=-10, x1=-1, y1=-1, x2=-1, y2=-1, w=-1, h=-1, l=-1, \
                  X=-1000, Y=-1000, Z=-1000, yaw=-10, score=-1000, detect_id=-1, \
-                 vx=0, vy=0, vz=0):
+                 vx=0, vy=0, vz=0, keypoint_x=0, keypoint_y=0):
         """init object data"""
         self.obj_type = obj_type
         self.truncation = truncation
@@ -44,6 +44,8 @@ class Data:
         self.ignored = False
         self.valid = False
         self.detect_id = detect_id
+        self.keypoint_x = keypoint_x
+        self.keypoint_y = keypoint_y
 
     def __str__(self):
         """ str """
@@ -89,10 +91,16 @@ def detect_data(pred, class_names):
         t_data.Y = float(fields[12])  # Y [m]
         t_data.Z = float(fields[13])  # Z [m]
         t_data.yaw = float(fields[14])  # yaw angle [rad]
-        if len(fields) >= 16:
+        if len(fields) == 18:
           t_data.score = round(float(fields[15]), 2)  # detection score
-        else:
+          t_data.keypoint_x = int(float(fields[16]))
+          t_data.keypoint_y = int(float(fields[17]))
+        if len(fields) == 17:
           t_data.score = 1
+          t_data.keypoint_x = int(float(fields[15]))
+          t_data.keypoint_y = int(float(fields[16]))
+
+
         t_data.detect_id = index
         data.append(t_data)
         index = index + 1
@@ -185,7 +193,7 @@ def get_camera_3d_8points_g2c(w3d, h3d, l3d, yaw_ground, center_ground,
         corners_3d_cam = np.matrix(g2c_trans) * corners_3d_ground #[3, 8]
 
     pt = p2[:3, :3] * corners_3d_cam
-    corners_2d = pt / pt[2]
+    corners_2d = pt / (pt[2] + 1e-6)
     corners_2d_all = corners_2d.reshape(-1)
     if True in np.isnan(corners_2d_all):
         print("Invalid projection")
@@ -294,8 +302,7 @@ def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
             cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), color_type, 2)
             cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (0, 0, 0), 1)
             cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (0, 0, 0), 1)
-            # cv2.circle(img, tuple(((verts3d[3] + verts3d[2]) / 2).astype(int)), radius=10, color=color_type,
-            #            thickness=-1)
+            cv2.circle(img, tuple((t.keypoint_x, t.keypoint_y)), radius=10, color=color_type, thickness=-1)
 
         for target_index in range(len(target)):
             t = target[target_index]
@@ -303,7 +310,7 @@ def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
                 continue
             if t.obj_type not in color_list.keys():
                 continue
-            color_type = color_list[t.obj_type]
+            # color_type = color_list[t.obj_type]
             # cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
             #               (255, 255, 255), 1)
             if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05:  # invalid annotation

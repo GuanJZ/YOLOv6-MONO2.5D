@@ -13,7 +13,7 @@ def set_logging(name=None):
 
 
 LOGGER = set_logging(__name__)
-NCOLS = min(300, shutil.get_terminal_size().columns)
+NCOLS = min(400, shutil.get_terminal_size().columns)
 
 
 def load_yaml(file_path):

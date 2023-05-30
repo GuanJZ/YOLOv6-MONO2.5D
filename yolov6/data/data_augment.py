@@ -105,10 +105,18 @@ def random_affine(img, labels=(), degrees=10, translate=.1, scale=.1, shear=10,
         new[:, [0, 2]] = new[:, [0, 2]].clip(0, width)
         new[:, [1, 3]] = new[:, [1, 3]].clip(0, height)
 
+        bbcp = np.ones((n, 3))
+        bbcp[:, :2] = labels[:, 18:20]
+        bbcp = bbcp @ M.T
+        bbcp = bbcp[:, :2]
+        bbcp[:, 0] = bbcp[:, 0].clip(0, width)
+        bbcp[:, 1] = bbcp[:, 1].clip(0, height)
+
         # filter candidates
         i = box_candidates(box1=labels[:, 1:5].T * s, box2=new.T, area_thr=0.1)
         labels = labels[i]
         labels[:, 1:5] = new[i]
+        labels[:, 18:20] = bbcp[i]
 
     return img, labels
 
@@ -181,6 +189,8 @@ def mosaic_augmentation(img_size, imgs, hs, ws, labels, hyp, img_paths, indices)
             boxes[:, 2] = w * (labels_per_img[:, 1] + labels_per_img[:, 3] / 2) + padw  # bottom right x
             boxes[:, 3] = h * (labels_per_img[:, 2] + labels_per_img[:, 4] / 2) + padh  # bottom right y
             labels_per_img[:, 1:] = boxes
+            labels_per_img[:, 18]  = labels_per_img[:, 18] * w + padw
+            labels_per_img[:, 19] = labels_per_img[:, 19] * h + padh
 
         labels4.append(labels_per_img)
 
@@ -194,6 +204,8 @@ def mosaic_augmentation(img_size, imgs, hs, ws, labels, hyp, img_paths, indices)
 
     for x in (labels4[:, 1:5]):
         np.clip(x, 0, 2 * s, out=x)
+    for y in (labels4[:, 18:20]):
+        np.clip(y, 0, 2 * s, out=y)
 
     # Augment
     img4, labels4 = random_affine(img4, labels4,

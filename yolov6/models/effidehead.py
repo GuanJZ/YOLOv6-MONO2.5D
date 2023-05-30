@@ -36,26 +36,30 @@ class Detect(nn.Module):
         self.dim_convs = nn.ModuleList()
         self.orient_convs = nn.ModuleList()
         self.conf_convs = nn.ModuleList()
+        self.bbcp_convs = nn.ModuleList()
         self.cls_preds = nn.ModuleList()
         self.reg_preds = nn.ModuleList()
         self.dim_preds = nn.ModuleList()
         self.orient_preds = nn.ModuleList()
         self.conf_preds = nn.ModuleList()
+        self.bbcp_preds = nn.ModuleList()
 
         # Efficient decoupled head layers
         for i in range(num_layers):
-            idx = i*11
+            idx = i*13
             self.stems.append(head_layers[idx])
             self.cls_convs.append(head_layers[idx+1])
             self.reg_convs.append(head_layers[idx+2])
             self.dim_convs.append(head_layers[idx+3])
             self.orient_convs.append(head_layers[idx+4])
             self.conf_convs.append(head_layers[idx+5])
-            self.cls_preds.append(head_layers[idx+6])
-            self.reg_preds.append(head_layers[idx+7])
-            self.dim_preds.append(head_layers[idx+8])
-            self.orient_preds.append(head_layers[idx+9])
-            self.conf_preds.append(head_layers[idx+10])
+            self.bbcp_convs.append(head_layers[idx+6])
+            self.cls_preds.append(head_layers[idx+7])
+            self.reg_preds.append(head_layers[idx+8])
+            self.dim_preds.append(head_layers[idx+9])
+            self.orient_preds.append(head_layers[idx+10])
+            self.conf_preds.append(head_layers[idx+11])
+            self.bbcp_preds.append(head_layers[idx+12])
 
 
     def initialize_biases(self):
@@ -87,6 +91,7 @@ class Detect(nn.Module):
             dim_diff_list = []
             orient_diff_list = []
             conf_list = []
+            bbcp_list = []
 
             for i in range(self.nl):
                 x[i] = self.stems[i](x[i])
@@ -95,6 +100,7 @@ class Detect(nn.Module):
                 dim_x = x[i]
                 orient_x = x[i]
                 conf_x = x[i]
+                bbcp_x = x[i]
 
                 cls_feat = self.cls_convs[i](cls_x)
                 cls_output = self.cls_preds[i](cls_feat)
@@ -106,6 +112,8 @@ class Detect(nn.Module):
                 orient_output = self.orient_preds[i](orient_feat)
                 conf_feat = self.conf_convs[i](conf_x)
                 conf_output = self.conf_preds[i](conf_feat)
+                bbcp_feat = self.bbcp_convs[i](bbcp_x)
+                bbcp_output = self.bbcp_preds[i](bbcp_feat)
 
                 cls_output = torch.sigmoid(cls_output)
                 conf_output = torch.sigmoid(conf_output)
@@ -119,20 +127,23 @@ class Detect(nn.Module):
                 orient_diff_list.append(orient_output.flatten(2).half())
                 # orient_diff_list.append(orient_output.flatten(2).permute((0, 2, 1)))
                 conf_list.append(conf_output.flatten(2).permute((0, 2, 1)))
+                bbcp_list.append(bbcp_output.flatten(2).permute((0, 2, 1)))
 
             cls_score_list = torch.cat(cls_score_list, axis=1)
             reg_distri_list = torch.cat(reg_distri_list, axis=1)
             dim_diff_list = torch.cat(dim_diff_list, axis=1)
             orient_diff_list = torch.cat(orient_diff_list, axis=1)
             conf_list = torch.cat(conf_list, axis=1)
+            bbcp_list = torch.cat(bbcp_list, axis=1)
 
-            return x, cls_score_list, reg_distri_list, dim_diff_list, orient_diff_list, conf_list
+            return x, cls_score_list, reg_distri_list, dim_diff_list, orient_diff_list, conf_list, bbcp_list
         else:
             cls_score_list = []
             reg_dist_list = []
             dim_diff_list = []
             orient_diff_list = []
             conf_list = []
+            bbcp_list = []
 
             anchor_points, stride_tensor = generate_anchors(
                 x, self.stride, self.grid_cell_size, self.grid_cell_offset, device=x[0].device, is_eval=True, mode='af')
@@ -146,6 +157,7 @@ class Detect(nn.Module):
                 dim_x = x[i]
                 orient_x = x[i]
                 conf_x = x[i]
+                bbcp_x = x[i]
 
                 cls_feat = self.cls_convs[i](cls_x)
                 cls_output = self.cls_preds[i](cls_feat)
@@ -157,6 +169,8 @@ class Detect(nn.Module):
                 orient_output = self.orient_preds[i](orient_feat)
                 conf_feat = self.conf_convs[i](conf_x)
                 conf_output = self.conf_preds[i](conf_feat)
+                bbcp_feat = self.bbcp_convs[i](bbcp_x)
+                bbcp_output = self.bbcp_preds[i](bbcp_feat)
 
                 if self.use_dfl:
                     reg_output = reg_output.reshape([-1, 4, self.reg_max + 1, l]).permute(0, 2, 1, 3)
@@ -174,16 +188,19 @@ class Detect(nn.Module):
                 orient_diff_list.append(orient_output.flatten(2))
                 # orient_diff_list.append(orient_output.flatten(2).permute((0, 2, 1)))
                 conf_list.append(conf_output.flatten(2).permute((0, 2, 1)))
+                bbcp_list.append(bbcp_output.flatten(2).permute((0, 2, 1)))
 
             cls_score_list = torch.cat(cls_score_list, axis=-1).permute(0, 2, 1)
             reg_dist_list = torch.cat(reg_dist_list, axis=-1).permute(0, 2, 1)
             dim_diff_list = torch.cat(dim_diff_list, axis=1)
             orient_diff_list = torch.cat(orient_diff_list, axis=1)
             conf_list = torch.cat(conf_list, axis=1)
+            bbcp_list = torch.cat(bbcp_list, axis=1)
 
 
             pred_bboxes = dist2bbox(reg_dist_list, anchor_points, box_format='xywh')
             pred_bboxes *= stride_tensor
+            bbcp_list = (bbcp_list + anchor_points) * stride_tensor
             return torch.cat(
                 [
                     pred_bboxes,
@@ -191,7 +208,8 @@ class Detect(nn.Module):
                     cls_score_list,
                     dim_diff_list,
                     orient_diff_list,
-                    conf_list
+                    conf_list,
+                    bbcp_list
                 ],
                 axis=-1)
 
@@ -243,6 +261,13 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
             kernel_size=3,
             stride=1
         ),
+        # bbcp_conv0
+        Conv(
+            in_channels=channels_list[chx[0]],
+            out_channels=channels_list[chx[0]],
+            kernel_size=3,
+            stride=1
+        ),
         # cls_pred0
         nn.Conv2d(
             in_channels=channels_list[chx[0]],
@@ -268,6 +293,12 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
             kernel_size=1
         ),
         # conf_pred0
+        nn.Conv2d(
+            in_channels=channels_list[chx[0]],
+            out_channels=2,
+            kernel_size=1
+        ),
+        # bbcp_pred0
         nn.Conv2d(
             in_channels=channels_list[chx[0]],
             out_channels=2,
@@ -315,6 +346,13 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
             kernel_size=3,
             stride=1
         ),
+        # bbcp_conv1
+        Conv(
+            in_channels=channels_list[chx[1]],
+            out_channels=channels_list[chx[1]],
+            kernel_size=3,
+            stride=1
+        ),
         # cls_pred1
         nn.Conv2d(
             in_channels=channels_list[chx[1]],
@@ -340,6 +378,12 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
             kernel_size=1
         ),
         # conf_pred1
+        nn.Conv2d(
+            in_channels=channels_list[chx[1]],
+            out_channels=2,
+            kernel_size=1
+        ),
+        # bbcp_pred1
         nn.Conv2d(
             in_channels=channels_list[chx[1]],
             out_channels=2,
@@ -387,6 +431,13 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
             kernel_size=3,
             stride=1
         ),
+        # bbcp_conv2
+        Conv(
+            in_channels=channels_list[chx[2]],
+            out_channels=channels_list[chx[2]],
+            kernel_size=3,
+            stride=1
+        ),
         # cls_pred2
         nn.Conv2d(
             in_channels=channels_list[chx[2]],
@@ -412,6 +463,12 @@ def build_effidehead_layer(channels_list, num_anchors, num_classes, reg_max=16, 
             kernel_size=1
         ),
         # conf_pred2
+        nn.Conv2d(
+            in_channels=channels_list[chx[2]],
+            out_channels=2,
+            kernel_size=1
+        ),
+        # bbcp_pred2
         nn.Conv2d(
             in_channels=channels_list[chx[2]],
             out_channels=2,
