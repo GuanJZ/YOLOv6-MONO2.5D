@@ -248,6 +248,7 @@ class Evaler:
                 # Predictions
                 predn = pred.clone()
                 self.scale_coords(imgs[si].shape[1:], predn[:, :4], shapes[si][0], shapes[si][1])  # native-space pred
+                self.scale_coords_keypoint(imgs[si].shape[1:], predn[:, 15:17], shapes[si][0], shapes[si][1])  # native-space pred
 
                 show_nms_output = False
                 if show_nms_output:
@@ -306,13 +307,18 @@ class Evaler:
                     tbox[:, [0, 2]] *= imgs[si].shape[1:][1]
                     tbox[:, [1, 3]] *= imgs[si].shape[1:][0]
 
+                    tbbcp = labels[:, 18:20]
+                    tbbcp[:, 0] *= imgs[si].shape[1:][1]
+                    tbbcp[:, 1] *= imgs[si].shape[1:][0]
+
                     self.scale_coords(imgs[si].shape[1:], tbox, shapes[si][0], shapes[si][1])  # native-space labels
+                    self.scale_coords_keypoint(imgs[si].shape[1:], tbbcp, shapes[si][0], shapes[si][1])  # native-space labels
 
                     # labelsn
-                    # from (cls, xyxy, HWL, XYZ, Ry, bbcp_x, bbcp_y)
+                    # from (cls, (x, y, x, y), (H, W, L), (X, Y, Z), Ry, ([cos, sin], [cos, sin]), (conf_cos, conf_sin), bbcp_x, bbcp_y)
                     # to
                     # (cls, xyxy, HWL, XYZ, Ry, bbcp_x, bbcp_y)
-                    labelsn = torch.cat((labels[:, 0:1], tbox, labels[:, 5:12], labels[:, 18:20]), 1)  # native-space labels
+                    labelsn = torch.cat((labels[:, 0:1], tbox, labels[:, 5:12], tbbcp), 1)  # native-space labels
 
                     from yolov6.utils.metrics import process_batch, compute_location
                     # get correct
@@ -324,7 +330,7 @@ class Evaler:
                     if self.do_3d:
                         matches = compute_location(predn_processed, labelsn)
                         # predn3d
-                        # from predn [xyxy, conf, cls, (H, W, L), Ry, bbcp_x, bbcp_y]
+                        # from predn [0:x, 1:y, 2:x, 3:y, 4:conf, 5:cls, 6:H, 7:W, 8:L, 9:Ry, 10:bbcp_x, 11:bbcp_y]
                         # to
                         # (ndarray)[cls, 0, 0, 0, x1, y1, x2, y2, H, W, L, X, Y, Z, Ry, conf, bbcp_x, bbcp_y]
                         predn_3d = np.zeros((predn_processed.shape[0], 18))
@@ -338,7 +344,7 @@ class Evaler:
                                 predn_3d[enum, 11:14] = labelsn_arr[int(m[1]), 8:11]
                                 predn_3d[enum, 14] = predn_arr[int(m[0]), 9]
                                 predn_3d[enum, 15] = predn_arr[int(m[0]), 4]
-                                predn_3d[enum, 16:18] = predn_arr[int(m[0]), 11:13]
+                                predn_3d[enum, 16:18] = predn_arr[int(m[0]), 10:12]
                         preds_3d.append(predn_3d)
                         save_pred_3d = True
                         if save_pred_3d:
@@ -352,8 +358,7 @@ class Evaler:
                         labelsn_3d = np.zeros((labelsn.shape[0], 17))
                         labelsn_3d[:, 0] = labelsn[:, 0]
                         labelsn_3d[:, 4:8] = labelsn[:, 1:5]
-                        labelsn_3d[:, 8:11] = labelsn[:, 5:8]
-                        labelsn_3d[:, 11:] = labelsn[:, 8:]
+                        labelsn_3d[:, 8:] = labelsn[:, 5:]
 
                         labels_3d.append(labelsn_3d)
                         img_paths.append(paths[si])
@@ -614,7 +619,15 @@ class Evaler:
         return y
 
     def scale_coords(self, img1_shape, coords, img0_shape, ratio_pad=None):
-        '''Rescale coords (xyxy) from img1_shape to img0_shape.'''
+        '''Rescale coords (xyxy) from img1_shape to img0_shape.
+        args:
+            img1_shape: [640, 640]
+            coords: [144, 4] in [640, 640]
+            img0_shape: [1080, 1920]
+            ratio_pad: [[0.3333, 0.3333], [0.0, 140.0]]
+        return:
+            corrds: [144, 4] in [1080, 1920]
+        '''
         if ratio_pad is None:  # calculate from img0_shape
             gain = [min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])]  # gain  = old / new
             if self.scale_exact:
@@ -640,6 +653,33 @@ class Evaler:
         else:  # np.array (faster grouped)
             coords[:, [0, 2]] = coords[:, [0, 2]].clip(0, img0_shape[1])  # x1, x2
             coords[:, [1, 3]] = coords[:, [1, 3]].clip(0, img0_shape[0])  # y1, y2
+        return coords
+
+    def scale_coords_keypoint(self, img1_shape, coords, img0_shape, ratio_pad=None):
+        '''Rescale coords (xyxy) from img1_shape to img0_shape.'''
+        if ratio_pad is None:  # calculate from img0_shape
+            gain = [min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])]  # gain  = old / new
+            if self.scale_exact:
+                gain = [img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]]
+            pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
+        else:
+            gain = ratio_pad[0]
+            pad = ratio_pad[1]
+
+        coords[:, 0] -= pad[0]  # x padding
+        if self.scale_exact:
+            coords[:, 0] /= gain[1]  # x gain
+        else:
+            coords[:, 0] /= gain[0]  # raw x gain
+        coords[:, 1] -= pad[1]  # y padding
+        coords[:, 1] /= gain[0]  # y gain
+
+        if isinstance(coords, torch.Tensor):  # faster individually
+            coords[:, 0].clamp_(0, img0_shape[1])  # x1
+            coords[:, 1].clamp_(0, img0_shape[0])  # y1
+        else:  # np.array (faster grouped)
+            coords[:, 0] = coords[:, 0].clip(0, img0_shape[1])  # x1, x2
+            coords[:, 1] = coords[:, 1].clip(0, img0_shape[0])  # y1, y2
         return coords
 
     def convert_to_coco_format(self, outputs, imgs, paths, shapes, ids):

@@ -96,7 +96,7 @@ class TrainValDataset(Dataset):
         if self.augment and random.random() < self.hyp["mosaic"]:
             img, labels = self.get_mosaic(index)
             shapes = None
-
+            LOGGER.info(f"{img.shape}")
             # MixUp augmentation
             if random.random() < self.hyp["mixup"]:
                 img_other, labels_other = self.get_mosaic(
@@ -143,6 +143,9 @@ class TrainValDataset(Dataset):
                     h * (labels[:, 2] + labels[:, 4] / 2) + pad[1]
                 )  # bottom right y
                 labels[:, 1:] = boxes
+
+                labels[:, 18] = labels[:, 18] * w + pad[0]
+                labels[:, 19] = labels[:, 19] * h + pad[1]
 
             if self.augment:
                 img, labels = random_affine(

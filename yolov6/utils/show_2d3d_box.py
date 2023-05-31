@@ -8,6 +8,8 @@ import pdb
 import yaml
 from pyquaternion import Quaternion
 import shutil
+from tqdm import tqdm
+from multiprocessing.pool import Pool
 
 color_list = {'pedestrian': (0, 0, 255),
               'cyclist': (0, 255, 255),
@@ -232,6 +234,105 @@ def project_3d_world(p2, de_center_in_world, w3d, h3d, l3d, ry3d, camera2world):
     verts3d = np.array(verts3d)
     return verts3d
 
+def show(args):
+    pred, label, img_path, class_names = args
+    result = detect_data(pred, class_names)
+    target = detect_data(label, class_names)
+
+    name = os.path.basename(img_path)
+    calib_file = img_path.replace("images", "calibs").replace("jpg", "txt")
+    p2 = read_kitti_cal(calib_file)
+
+    extrinsic_file = img_path.replace("images", "extrinsics").replace("jpg", "yaml")
+    world2camera = read_kitti_ext(extrinsic_file).reshape((4, 4))
+    camera2world = np.linalg.inv(world2camera).reshape(4, 4)
+
+    img = cv2.imread(img_path)
+    H, W, C = img.shape
+    thresh = -0.5
+
+    for result_index in range(len(result)):
+        t = result[result_index]
+        if t.score < thresh:
+            continue
+        if t.obj_type not in color_list.keys():
+            continue
+        color_type = color_list[t.obj_type]
+        cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
+                      color_type, 1)
+        lw = max(round(sum([H, W]) / 2 * 0.003), 2)
+        cv2.putText(img, f"{t.obj_type}:{t.score}", (t.x1, t.y1 - 2), cv2.FONT_HERSHEY_COMPLEX, \
+                    lw / 4, color_type, thickness=max(lw - 1, 1), lineType=cv2.LINE_AA)
+
+        if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05:  # invalid annotation
+            continue
+
+        cam_bottom_center = [t.X, t.Y, t.Z]  # bottom center in Camera coordinate
+
+        bottom_center_in_world = camera2world * np.matrix(cam_bottom_center + [1.0]).T
+        verts3d = project_3d_world(p2, bottom_center_in_world, t.w, t.h, t.l, t.yaw, camera2world)
+
+        if verts3d is None:
+            continue
+        verts3d = verts3d.astype(np.int32)
+
+        # draw projection
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[1]), color_type, 2)
+        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[0]), color_type, 2)
+        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[3]), color_type, 2)
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[3]), color_type, 2)
+        cv2.line(img, tuple(verts3d[7]), tuple(verts3d[4]), color_type, 2)
+        cv2.line(img, tuple(verts3d[4]), tuple(verts3d[5]), color_type, 2)
+        cv2.line(img, tuple(verts3d[5]), tuple(verts3d[6]), color_type, 2)
+        cv2.line(img, tuple(verts3d[6]), tuple(verts3d[7]), color_type, 2)
+        cv2.line(img, tuple(verts3d[7]), tuple(verts3d[3]), color_type, 2)
+        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), color_type, 2)
+        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), color_type, 2)
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), color_type, 2)
+        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (0, 0, 0), 1)
+        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (0, 0, 0), 1)
+        cv2.circle(img, tuple((t.keypoint_x, t.keypoint_y)), radius=10, color=color_type, thickness=-1)
+
+    for target_index in range(len(target)):
+        t = target[target_index]
+        if t.score < thresh:
+            continue
+        if t.obj_type not in color_list.keys():
+            continue
+        # color_type = color_list[t.obj_type]
+        # cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
+        #               (255, 255, 255), 1)
+        if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05:  # invalid annotation
+            continue
+
+        cam_bottom_center = [t.X, t.Y, t.Z]  # bottom center in Camera coordinate
+
+        bottom_center_in_world = camera2world * np.matrix(cam_bottom_center + [1.0]).T
+        verts3d = project_3d_world(p2, bottom_center_in_world, t.w, t.h, t.l, t.yaw, camera2world)
+
+        if verts3d is None:
+            continue
+        verts3d = verts3d.astype(np.int32)
+
+        # draw projection
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[1]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[0]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[3]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[3]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[7]), tuple(verts3d[4]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[4]), tuple(verts3d[5]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[5]), tuple(verts3d[6]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[6]), tuple(verts3d[7]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[7]), tuple(verts3d[3]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (255, 255, 255), 1)
+        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (255, 255, 255), 1)
+        cv2.circle(img, tuple((t.keypoint_x, t.keypoint_y)), radius=5, color=(255, 255, 255), thickness=-1)
+
+    return name, img
+
 def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
     """
     preds_3d: list(ndarray)
@@ -243,103 +344,11 @@ def show_2d3d_box(preds, labels, img_paths, class_names, save_dir):
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-    from tqdm import tqdm
-    for i, (pred, label, img_path) in tqdm(enumerate(zip(preds, labels, img_paths))):
-        progress(i, len(img_paths))
-
-        result = detect_data(pred, class_names)
-        target = detect_data(label, class_names)
-
-        name = os.path.basename(img_path)
-        calib_file = img_path.replace("images", "calibs").replace("jpg", "txt")
-        p2 = read_kitti_cal(calib_file)
-
-        extrinsic_file = img_path.replace("images", "extrinsics").replace("jpg", "yaml")
-        world2camera = read_kitti_ext(extrinsic_file).reshape((4, 4))
-        camera2world = np.linalg.inv(world2camera).reshape(4, 4)
-
-        img = cv2.imread(img_path)
-        H, W, C = img.shape
-        thresh = -0.5
-
-        for result_index in range(len(result)):
-            t = result[result_index]
-            if t.score < thresh:
-                continue
-            if t.obj_type not in color_list.keys():
-                continue
-            color_type = color_list[t.obj_type]
-            cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
-                          color_type, 1)
-            lw = max(round(sum([H, W]) / 2 * 0.003), 2)
-            cv2.putText(img, f"{t.obj_type}:{t.score}",(t.x1, t.y1-2), cv2.FONT_HERSHEY_COMPLEX, \
-                        lw / 4, color_type, thickness = max(lw - 1, 1), lineType=cv2.LINE_AA)
-
-            if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05: #invalid annotation
-                continue
-
-            cam_bottom_center = [t.X, t.Y, t.Z]  # bottom center in Camera coordinate
-
-            bottom_center_in_world = camera2world * np.matrix(cam_bottom_center + [1.0]).T
-            verts3d = project_3d_world(p2, bottom_center_in_world, t.w, t.h, t.l, t.yaw, camera2world)
-
-            if verts3d is None:
-                continue
-            verts3d = verts3d.astype(np.int32)
-
-            # draw projection
-            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[1]), color_type, 2)
-            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[0]), color_type, 2)
-            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[3]), color_type, 2)
-            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[3]), color_type, 2)
-            cv2.line(img, tuple(verts3d[7]), tuple(verts3d[4]), color_type, 2)
-            cv2.line(img, tuple(verts3d[4]), tuple(verts3d[5]), color_type, 2)
-            cv2.line(img, tuple(verts3d[5]), tuple(verts3d[6]), color_type, 2)
-            cv2.line(img, tuple(verts3d[6]), tuple(verts3d[7]), color_type, 2)
-            cv2.line(img, tuple(verts3d[7]), tuple(verts3d[3]), color_type, 2)
-            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), color_type, 2)
-            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), color_type, 2)
-            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), color_type, 2)
-            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (0, 0, 0), 1)
-            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (0, 0, 0), 1)
-            cv2.circle(img, tuple((t.keypoint_x, t.keypoint_y)), radius=10, color=color_type, thickness=-1)
-
-        for target_index in range(len(target)):
-            t = target[target_index]
-            if t.score < thresh:
-                continue
-            if t.obj_type not in color_list.keys():
-                continue
-            # color_type = color_list[t.obj_type]
-            # cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
-            #               (255, 255, 255), 1)
-            if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05:  # invalid annotation
-                continue
-
-            cam_bottom_center = [t.X, t.Y, t.Z]  # bottom center in Camera coordinate
-
-            bottom_center_in_world = camera2world * np.matrix(cam_bottom_center + [1.0]).T
-            verts3d = project_3d_world(p2, bottom_center_in_world, t.w, t.h, t.l, t.yaw, camera2world)
-
-            if verts3d is None:
-                continue
-            verts3d = verts3d.astype(np.int32)
-
-            # draw projection
-            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[1]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[0]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[3]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[3]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[7]), tuple(verts3d[4]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[4]), tuple(verts3d[5]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[5]), tuple(verts3d[6]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[6]), tuple(verts3d[7]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[7]), tuple(verts3d[3]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (255, 255, 255), 1)
-            cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (255, 255, 255), 1)
-            # cv2.circle(img, tuple(((verts3d[3] + verts3d[2])/2).astype(int)), radius=10, color=(255, 255, 255), thickness=-1)
-
-        cv2.imwrite('%s/%s.jpg' % (out_dir, name), img)
+    NUM_THREADS = min(48, os.cpu_count())
+    class_names = [class_names]*len(preds)
+    with Pool(NUM_THREADS) as pool:
+        pbar = pool.imap(show, zip(preds, labels, img_paths, class_names))
+        pbar = tqdm(pbar, total=len(labels))
+        for name, img in pbar:
+            cv2.imwrite('%s/%s.jpg' % (out_dir, name), img)
+    pbar.close()

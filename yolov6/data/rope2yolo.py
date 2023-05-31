@@ -27,11 +27,6 @@ NUM_THREADS = min(48, os.cpu_count())
 
 bins, overlap = 2, 0.1
 
-# out_dir = "/home/wuweiguan/111"
-# if os.path.exists(out_dir):
-#     shutil.rmtree(out_dir)
-# os.makedirs(out_dir)
-
 def get_keypoint(args):
     label, img_path, img_shape = args
     import copy
@@ -59,26 +54,7 @@ def get_keypoint(args):
         verts3d = verts3d.astype(int)
         keypoint = (verts3d[3] + verts3d[2]) / 2
         keypoint = keypoint / img_shape[::-1]
-
-        # color_type = color_list[t.obj_type]
-        # cv2.line(img, tuple(verts3d[2]), tuple(verts3d[1]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[1]), tuple(verts3d[0]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[0]), tuple(verts3d[3]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[2]), tuple(verts3d[3]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[7]), tuple(verts3d[4]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[4]), tuple(verts3d[5]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[5]), tuple(verts3d[6]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[6]), tuple(verts3d[7]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[7]), tuple(verts3d[3]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), color_type, 2)
-        # cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (0, 0, 0), 1)
-        # cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (0, 0, 0), 1)
-        # cv2.circle(img, tuple((keypoint * img_shape[::-1]).astype(int)), radius=10, color=color_type, thickness=-1)
-
         keypoints.append(keypoint)
-    # cv2.imwrite('%s/%s.jpg' % (out_dir, name), img)
 
     return np.asarray(keypoints)
 
