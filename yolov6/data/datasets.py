@@ -96,7 +96,6 @@ class TrainValDataset(Dataset):
         if self.augment and random.random() < self.hyp["mosaic"]:
             img, labels = self.get_mosaic(index)
             shapes = None
-            LOGGER.info(f"{img.shape}")
             # MixUp augmentation
             if random.random() < self.hyp["mixup"]:
                 img_other, labels_other = self.get_mosaic(
@@ -539,7 +538,7 @@ class TrainValDataset(Dataset):
                         len(l) == 23 for l in labels
                     ), f"{lb_path}: wrong label format."
                     assert (
-                        labels[:, [0, 1, 2, 3, 4, 16, 17, 18, 19]] >= 0
+                        labels[:, [0, 1, 2, 3, 4]] >= 0
                     ).all(), f"{lb_path}: Label values error: all values in label file must > 0"
                     assert (
                         labels[:, 1:5] <= 1
