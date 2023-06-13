@@ -44,7 +44,8 @@ model = dict(
             'dfl': 0.5,
             'dims': 0.5,
             'conf': 1.0,
-            'orint': 3.0
+            'orint': 1.0,
+            'bbcp': 0.5
         }
     )
 )
