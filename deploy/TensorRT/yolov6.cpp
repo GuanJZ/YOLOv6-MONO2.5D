@@ -407,11 +407,24 @@ void doInference(IExecutionContext& context, float* input, float* output, const 
     cudaStream_t stream;
     CHECK(cudaStreamCreate(&stream));
 
+    std::cout << "warm up" << std::endl;
+    for (int i = 0; i < 1; i++){
+        CHECK(cudaMemcpyAsync(buffers[inputIndex], input, 3 * input_shape.height * input_shape.width * sizeof(float), cudaMemcpyHostToDevice, stream));
+        context.enqueue(1, buffers, stream, nullptr);
+        CHECK(cudaMemcpyAsync(output, buffers[outputIndex], output_size * sizeof(float), cudaMemcpyDeviceToHost, stream));
+        cudaStreamSynchronize(stream);
+    }
+    std::cout << "start infrence ..." <<std::endl;
+    auto start = std::chrono::system_clock::now();
     // DMA input batch data to device, infer on the batch asynchronously, and DMA output back to host
     CHECK(cudaMemcpyAsync(buffers[inputIndex], input, 3 * input_shape.height * input_shape.width * sizeof(float), cudaMemcpyHostToDevice, stream));
     context.enqueue(1, buffers, stream, nullptr);
     CHECK(cudaMemcpyAsync(output, buffers[outputIndex], output_size * sizeof(float), cudaMemcpyDeviceToHost, stream));
     cudaStreamSynchronize(stream);
+    auto end = std::chrono::system_clock::now();
+    std::cout << "end inference ..." << std::endl;
+    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+
 
     // Release stream and buffers
     cudaStreamDestroy(stream);
@@ -477,12 +490,7 @@ int main(int argc, char** argv) {
     float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
 
     // run inference
-    std::cout << "start infrence ..." <<std::endl;
-    auto start = std::chrono::system_clock::now();
     doInference(*context, blob, prob, output_size, pr_img.size());
-    auto end = std::chrono::system_clock::now();
-    std::cout << "end inference ..." << std::endl;
-    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
 
     std::vector<Object> objects;
     decode_outputs(prob, output_size, objects, scale, img_w, img_h);
