@@ -22,27 +22,20 @@
     } while (0)
 
 #define DEVICE 0  // GPU id
-#define NMS_THRESH 0.45
-#define BBOX_CONF_THRESH 0.5
+#define NMS_THRESH 0.65
+#define BBOX_CONF_THRESH 0.48
 
 using namespace nvinfer1;
 
 // stuff we know about the network and the input/output blobs
-const int num_class = 80;
+const int num_class = 12;
 static const int INPUT_W = 640;
 static const int INPUT_H = 640;
-const char* INPUT_BLOB_NAME = "image_arrays";
+const char* INPUT_BLOB_NAME = "images";
 const char* OUTPUT_BLOB_NAME = "outputs";
 static const char* class_names[] = {
-        "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-        "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-        "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-        "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
-        "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-        "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-        "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
-        "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-        "hair drier", "toothbrush"
+        "trafficcone", "tricyclist", "van", "cyclist", "unknowns_movable", "car", "pedestrian",
+  "unknown_unmovable", "bus", "truck", "barrow", "motorcyclist"
     };
 
 
@@ -443,6 +436,7 @@ int main(int argc, char** argv) {
             assert(trtModelStream);
             file.read(trtModelStream, size);
             file.close();
+            std::cout << "load file" << std::endl;
         }
     } else {
         std::cerr << "arguments not right!" << std::endl;
@@ -453,16 +447,21 @@ int main(int argc, char** argv) {
 
     IRuntime* runtime = createInferRuntime(gLogger);
     assert(runtime != nullptr);
+    std::cout << "runtime ptr create" << std::endl;
     ICudaEngine* engine = runtime->deserializeCudaEngine(trtModelStream, size);
     assert(engine != nullptr);
+    std::cout << "engine ptr create" << std::endl;
     IExecutionContext* context = engine->createExecutionContext();
     assert(context != nullptr);
+    std::cout << "context ptr create" << std::endl;
+
     delete[] trtModelStream;
     auto out_dims = engine->getBindingDimensions(1);
     auto output_size = 1;
     for(int j=0;j<out_dims.nbDims;j++) {
         output_size *= out_dims.d[j];
     }
+    std::cout << "output size: " << output_size << std::endl;
     static float* prob = new float[output_size];
 
     cv::Mat img = cv::imread(input_image_path);
@@ -470,15 +469,19 @@ int main(int argc, char** argv) {
     int img_h = img.rows;
     cv::Mat pr_img = static_resize(img);
     std::cout << "blob image" << std::endl;
+    std::cout << "blob image width: " << img_w << std::endl;
+    std::cout << "blob image height: " << img_h << std::endl;
 
     float* blob;
     blob = blobFromImage(pr_img);
     float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
 
     // run inference
+    std::cout << "start infrence ..." <<std::endl;
     auto start = std::chrono::system_clock::now();
     doInference(*context, blob, prob, output_size, pr_img.size());
     auto end = std::chrono::system_clock::now();
+    std::cout << "end inference ..." << std::endl;
     std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
 
     std::vector<Object> objects;

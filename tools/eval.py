@@ -46,7 +46,7 @@ def get_args_parser(add_help=True):
     parser.add_argument('--plot_confusion_matrix', default=False, action='store_true', help='whether to save confusion matrix plots when do pr metric, might cause no harm warning print')
     parser.add_argument('--verbose', default=False, action='store_true', help='whether to print metric on each class')
     parser.add_argument('--config-file', default='', type=str, help='experiments description file, lower priority than reproduce_640_eval')
-    parser.add_argument('--val_trt', default=False, type=boolean_string, help='')
+    parser.add_argument('--val_trt', action="store_true", default=False, help='')
     args = parser.parse_args()
 
     if args.config_file:

@@ -120,3 +120,5 @@ data/coco128.yaml
 data/coco128
 data/mini_rope3d
 *.cache
+data/Rope3D
+deploy/TensorRT/cmake-build-debug/
