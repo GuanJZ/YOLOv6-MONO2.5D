@@ -16,8 +16,8 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(/usr/local/cuda/include)
 link_directories(/usr/local/cuda/lib64)
 # tensorrt
-include_directories(/usr/include/x86_64-linux-gnu/)
-link_directories(/usr/lib/x86_64-linux-gnu/)
+include_directories(/home/junzhi/softwares/nvidia/TensorRT-8.2.5.1.Linux.x86_64-gnu.cuda-11.4.cudnn8.2/TensorRT-8.2.5.1/targets/x86_64-linux-gnu/include)
+link_directories(/home/junzhi/softwares/nvidia/TensorRT-8.2.5.1.Linux.x86_64-gnu.cuda-11.4.cudnn8.2/TensorRT-8.2.5.1/targets/x86_64-linux-gnu/lib)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Ofast -Wfatal-errors -D_MWAITXINTRIN_H_INCLUDED")
 
