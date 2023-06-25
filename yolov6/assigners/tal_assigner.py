@@ -25,6 +25,7 @@ class TaskAlignedAssigner(nn.Module):
                 pd_dims,
                 pd_orient,
                 pd_conf,
+                pd_bbcp,
                 anc_points,
                 gt_labels,
                 gt_bboxes,
@@ -60,6 +61,7 @@ class TaskAlignedAssigner(nn.Module):
                    torch.zeros_like(pd_dims).to(device), \
                    torch.zeros_like(pd_orient).to(device), \
                    torch.zeros_like(pd_conf).to(device), \
+                   torch.zeros_like(pd_bbcp).to(device), \
                    torch.zeros_like(pd_scores[..., 0]).to(device)
 
 

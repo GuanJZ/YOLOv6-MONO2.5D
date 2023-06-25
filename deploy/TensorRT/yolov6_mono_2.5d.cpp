@@ -161,10 +161,10 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 
 static void generate_yolo_proposals(float* feat_blob, int output_size, float prob_threshold, std::vector<Object>& objects)
 {
-    auto dets = output_size / (num_class + 5);
+    auto dets = output_size / (num_class + 5 + 3+4+2+2);
     for (int boxs_idx = 0; boxs_idx < dets; boxs_idx++)
     {
-        const int basic_pos = boxs_idx *(num_class + 5);
+        const int basic_pos = boxs_idx *(num_class + 5 + 3+4+2+2);
         float x_center = feat_blob[basic_pos+0];
         float y_center = feat_blob[basic_pos+1];
         float w = feat_blob[basic_pos+2];

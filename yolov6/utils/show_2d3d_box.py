@@ -11,10 +11,10 @@ import shutil
 from tqdm import tqdm
 from multiprocessing.pool import Pool
 
-color_list = {'pedestrian': (0, 0, 255),
-              'cyclist': (0, 255, 255),
-              'car': (255, 0, 255),
-              'big_vehicle': (255, 255, 0)
+color_list = {'pedestrian': [0.000, 0.447, 0.741],
+              'cyclist': [0.850, 0.325, 0.098],
+              'car': [0.929, 0.694, 0.125],
+              'big_vehicle': [0.494, 0.184, 0.556]
               }
 
 class Data:
@@ -257,12 +257,19 @@ def show(args):
             continue
         if t.obj_type not in color_list.keys():
             continue
+        # 2d检测框的颜色
         color_type = color_list[t.obj_type]
+        color = (color_type[0]*255, color_type[1]*255, color_type[2]*255)
         cv2.rectangle(img, (t.x1, t.y1), (t.x2, t.y2),
-                      color_type, 1)
-        lw = max(round(sum([H, W]) / 2 * 0.003), 2)
-        cv2.putText(img, f"{t.obj_type}:{t.score}", (t.x1, t.y1 - 2), cv2.FONT_HERSHEY_COMPLEX, \
-                    lw / 4, color_type, thickness=max(lw - 1, 1), lineType=cv2.LINE_AA)
+                      color, 2)
+        # 标签的颜色
+        txt_color = (0, 0, 0) if (sum(color_type)/len(color_type)) > 0.5 else (255, 255, 255)
+        txt_bk_color = (color_type[0]*255*0.7, color_type[1]*255*0.7, color_type[2]*255*0.7)
+        text = f"{t.obj_type}:{t.score}"
+        label_size, baseLine = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
+        cv2.rectangle(img, (t.x1, t.y1-label_size[1] - 1), (t.x1+label_size[0], t.y1), txt_bk_color, -1)
+        cv2.putText(img, text, (t.x1, t.y1 -1 ), cv2.FONT_HERSHEY_SIMPLEX, \
+                    0.4, txt_color, thickness=1)
 
         if t.w <= 0.05 and t.l <= 0.05 and t.h <= 0.05:  # invalid annotation
             continue
@@ -277,18 +284,18 @@ def show(args):
         verts3d = verts3d.astype(np.int32)
 
         # draw projection
-        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[1]), color_type, 2)
-        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[0]), color_type, 2)
-        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[3]), color_type, 2)
-        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[3]), color_type, 2)
-        cv2.line(img, tuple(verts3d[7]), tuple(verts3d[4]), color_type, 2)
-        cv2.line(img, tuple(verts3d[4]), tuple(verts3d[5]), color_type, 2)
-        cv2.line(img, tuple(verts3d[5]), tuple(verts3d[6]), color_type, 2)
-        cv2.line(img, tuple(verts3d[6]), tuple(verts3d[7]), color_type, 2)
-        cv2.line(img, tuple(verts3d[7]), tuple(verts3d[3]), color_type, 2)
-        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), color_type, 2)
-        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), color_type, 2)
-        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), color_type, 2)
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[1]), color, 2)
+        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[0]), color, 2)
+        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[3]), color, 2)
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[3]), color, 2)
+        cv2.line(img, tuple(verts3d[7]), tuple(verts3d[4]), color, 2)
+        cv2.line(img, tuple(verts3d[4]), tuple(verts3d[5]), color, 2)
+        cv2.line(img, tuple(verts3d[5]), tuple(verts3d[6]), color, 2)
+        cv2.line(img, tuple(verts3d[6]), tuple(verts3d[7]), color, 2)
+        cv2.line(img, tuple(verts3d[7]), tuple(verts3d[3]), color, 2)
+        cv2.line(img, tuple(verts3d[1]), tuple(verts3d[5]), color, 2)
+        cv2.line(img, tuple(verts3d[0]), tuple(verts3d[4]), color, 2)
+        cv2.line(img, tuple(verts3d[2]), tuple(verts3d[6]), color, 2)
         cv2.line(img, tuple(verts3d[0]), tuple(verts3d[5]), (0, 0, 0), 1)
         cv2.line(img, tuple(verts3d[1]), tuple(verts3d[4]), (0, 0, 0), 1)
         cv2.circle(img, tuple((t.keypoint_x, t.keypoint_y)), radius=10, color=color_type, thickness=-1)

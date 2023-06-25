@@ -118,6 +118,7 @@ class ComputeLoss:
                         pred_dim.detach(),
                         pred_orient.detach(),
                         pred_conf.detach(),
+                        pred_bbcp.detach(),
                         anchor_points,
                         gt_labels,
                         gt_bboxes,
@@ -156,24 +157,41 @@ class ComputeLoss:
             else:
                 _pred_scores = pred_scores.detach().cpu().float()
                 _pred_bboxes = pred_bboxes.detach().cpu().float()
+                _pred_dim = pred_dim.detach().cpu().float()
+                _pred_orient = pred_orient.detach().cpu().float()
+                _pred_conf = pred_conf.detach().cpu().float()
+                _pred_bbcp = pred_bbcp.detach().cpu().float()
                 _anchor_points = anchor_points.cpu().float()
                 _gt_labels = gt_labels.cpu().float()
                 _gt_bboxes = gt_bboxes.cpu().float()
                 _mask_gt = mask_gt.cpu().float()
                 _stride_tensor = stride_tensor.cpu().float()
+                _gt_dims = gt_dims.cpu().float()
+                _gt_orients= gt_orients.cpu().float()
+                _gt_confs = gt_confs.cpu().float()
+                _gt_bbcp = gt_bbcp.cpu().float()
 
-                target_labels, target_bboxes, target_scores, fg_mask = \
+                target_labels, target_bboxes, target_scores, target_dims, target_orients, target_confs, target_bbcp, fg_mask = \
                     self.formal_assigner(
                         _pred_scores,
                         _pred_bboxes * _stride_tensor,
+                        _pred_dim,
+                        _pred_orient,
+                        _pred_conf,
+                        _pred_bbcp,
                         _anchor_points,
                         _gt_labels,
                         _gt_bboxes,
+                        _gt_dims,
+                        _gt_orients,
+                        _gt_confs,
+                        _gt_bbcp,
                         _mask_gt)
 
             target_labels = target_labels.cuda()
             target_bboxes = target_bboxes.cuda()
             target_scores = target_scores.cuda()
+            target_dims, target_orients, target_confs, target_bbcp = target_dims.cuda(), target_orients.cuda(), target_confs.cuda(), target_bbcp.cuda()
             fg_mask = fg_mask.cuda()
         #Dynamic release GPU memory
         if step_num % 10 == 0:
