@@ -24,9 +24,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Ofast -Wfatal-errors -
 find_package(OpenCV)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-add_executable(yolov6 ${PROJECT_SOURCE_DIR}/yolov6.cpp)
+add_executable(yolov6 ${PROJECT_SOURCE_DIR}/yolov6_mono_2.5d.cpp)
 target_link_libraries(yolov6 nvinfer)
 target_link_libraries(yolov6 cudart)
 target_link_libraries(yolov6 ${OpenCV_LIBS})
 
-add_definitions(-O2 -pthread)
+add_definitions(-O0 -pthread)

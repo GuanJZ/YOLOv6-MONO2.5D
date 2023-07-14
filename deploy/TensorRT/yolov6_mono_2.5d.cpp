@@ -4,6 +4,7 @@
 #include <numeric>
 #include <chrono>
 #include <vector>
+#include <cmath>
 #include <opencv2/opencv.hpp>
 #include <dirent.h>
 #include "NvInfer.h"
@@ -70,16 +71,30 @@ struct Object
     cv::Rect_<float> rect;
     int label;
     float prob;
+    float W, H, L;
+    float Ry;
+    float offset_x, offset_y;
+};
+
+struct InterObject
+{
+    cv::Rect_<float> rect;
+    int label;
+    float prob;
+    float W_log, H_log, L_log;
+    float cos1, sin1, cos2, sin2;
+    float conf_orient1, conf_orient2;
+    float offset_x, offset_y;
 };
 
 
-static inline float intersection_area(const Object& a, const Object& b)
+static inline float intersection_area(const InterObject& a, const InterObject& b)
 {
     cv::Rect_<float> inter = a.rect & b.rect;
     return inter.area();
 }
 
-static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, int right)
+static void qsort_descent_inplace(std::vector<InterObject>& faceobjects, int left, int right)
 {
     int i = left;
     int j = right;
@@ -116,7 +131,7 @@ static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, in
     }
 }
 
-static void qsort_descent_inplace(std::vector<Object>& objects)
+static void qsort_descent_inplace(std::vector<InterObject>& objects)
 {
     if (objects.empty())
         return;
@@ -124,7 +139,7 @@ static void qsort_descent_inplace(std::vector<Object>& objects)
     qsort_descent_inplace(objects, 0, objects.size() - 1);
 }
 
-static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vector<int>& picked, float nms_threshold)
+static void nms_sorted_bboxes(const std::vector<InterObject>& faceobjects, std::vector<int>& picked, float nms_threshold)
 {
     picked.clear();
 
@@ -138,12 +153,12 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 
     for (int i = 0; i < n; i++)
     {
-        const Object& a = faceobjects[i];
+        const InterObject& a = faceobjects[i];
 
         int keep = 1;
         for (int j = 0; j < (int)picked.size(); j++)
         {
-            const Object& b = faceobjects[picked[j]];
+            const InterObject& b = faceobjects[picked[j]];
 
             // intersection over union
             float inter_area = intersection_area(a, b);
@@ -159,7 +174,7 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 }
 
 
-static void generate_yolo_proposals(float* feat_blob, int output_size, float prob_threshold, std::vector<Object>& objects)
+static void generate_yolo_proposals(float* feat_blob, int output_size, float prob_threshold, std::vector<InterObject>& objects)
 {
     auto dets = output_size / (num_class + 5 + 3+4+2+2);
     for (int boxs_idx = 0; boxs_idx < dets; boxs_idx++)
@@ -172,20 +187,41 @@ static void generate_yolo_proposals(float* feat_blob, int output_size, float pro
         float x0 = x_center - w * 0.5f;
         float y0 = y_center - h * 0.5f;
         float box_objectness = feat_blob[basic_pos+4];
-        // std::cout<<*feat_blob<<std::endl;
+        float H_log = feat_blob[basic_pos+4+num_class+1];
+        float W_log = feat_blob[basic_pos+4+num_class+2];
+        float L_log = feat_blob[basic_pos+4+num_class+3];
+        float cos1 = feat_blob[basic_pos+4+num_class+4];
+        float sin1 = feat_blob[basic_pos+4+num_class+5];
+        float cos2 = feat_blob[basic_pos+4+num_class+6];
+        float sin2 = feat_blob[basic_pos+4+num_class+7];
+        float conf_orient1 = feat_blob[basic_pos+4+num_class+8];
+        float conf_orient2 = feat_blob[basic_pos+4+num_class+9];
+        float offset_x = feat_blob[basic_pos+4+num_class+10];
+        float offset_y = feat_blob[basic_pos+4+num_class+11];
         for (int class_idx = 0; class_idx < num_class; class_idx++)
         {
             float box_cls_score = feat_blob[basic_pos + 5 + class_idx];
             float box_prob = box_objectness * box_cls_score;
             if (box_prob > prob_threshold)
             {
-                Object obj;
+                InterObject obj;
                 obj.rect.x = x0;
                 obj.rect.y = y0;
                 obj.rect.width = w;
                 obj.rect.height = h;
                 obj.label = class_idx;
                 obj.prob = box_prob;
+                obj.H_log = H_log;
+                obj.L_log = L_log;
+                obj.W_log = W_log;
+                obj.cos1 = cos1;
+                obj.sin1 = sin1;
+                obj.cos2 = cos2;
+                obj.sin2 = sin2;
+                obj.conf_orient1 = conf_orient1;
+                obj.conf_orient2 =conf_orient2;
+                obj.offset_x = offset_x;
+                obj.offset_y = offset_y;
 
                 objects.push_back(obj);
             }
@@ -232,7 +268,7 @@ float* blobFromImage(cv::Mat& img){
 
 static void decode_outputs(float* prob, int output_size, std::vector<Object>& objects, float scale, const int img_w, const int img_h) {
         auto start = std::chrono::system_clock::now();
-        std::vector<Object> proposals;
+        std::vector<InterObject> proposals;
         generate_yolo_proposals(prob, output_size, BBOX_CONF_THRESH, proposals);
         auto end1 = std::chrono::system_clock::now();
         std::cout << "delay of generate_yolo_proposals: ";
@@ -256,13 +292,12 @@ static void decode_outputs(float* prob, int output_size, std::vector<Object>& ob
         objects.resize(count);
         for (int i = 0; i < count; i++)
         {
-            objects[i] = proposals[picked[i]];
-
+//            objects[i] = proposals[picked[i]];
             // adjust offset to original unpadded
-            float x0 = (objects[i].rect.x) / scale;
-            float y0 = (objects[i].rect.y) / scale;
-            float x1 = (objects[i].rect.x + objects[i].rect.width) / scale;
-            float y1 = (objects[i].rect.y + objects[i].rect.height) / scale;
+            float x0 = (proposals[picked[i]].rect.x) / scale;
+            float y0 = (proposals[picked[i]].rect.y) / scale;
+            float x1 = (proposals[picked[i]].rect.x + proposals[picked[i]].rect.width) / scale;
+            float y1 = (proposals[picked[i]].rect.y + proposals[picked[i]].rect.height) / scale;
 
             // clip
             x0 = std::max(std::min(x0, (float)(img_w - 1)), 0.f);
@@ -274,6 +309,32 @@ static void decode_outputs(float* prob, int output_size, std::vector<Object>& ob
             objects[i].rect.y = y0;
             objects[i].rect.width = x1 - x0;
             objects[i].rect.height = y1 - y0;
+            objects[i].label = proposals[picked[i]].label;
+            objects[i].prob = proposals[picked[i]].prob;
+            objects[i].H = exp(proposals[picked[i]].H_log);
+            objects[i].W = exp(proposals[picked[i]].W_log);
+            objects[i].L = exp(proposals[picked[i]].L_log);
+
+            // 计算theta
+            float intrinsic_fx = 2183.375019;
+            float fovx = 2 * atan2(img_w, 2*intrinsic_fx);
+            float center = (x0 + y0) / 2.0;
+            float dx = center - (img_w / 2);
+            float mult = (dx>0) ? 1:-1;
+            float theta = mult * atan((2 * mult * dx * tan(fovx / 2)) / img_w);
+
+            // 解码alpha
+            float alpha_decode;
+            if (proposals[picked[i]].conf_orient1 > proposals[picked[i]].conf_orient2)
+            {
+                alpha_decode = atan2(proposals[picked[i]].sin1, proposals[picked[i]].cos1) + (0 + 0.5 -1)*3.1415926;
+            } else{
+                alpha_decode = atan2(proposals[picked[i]].sin2, proposals[picked[i]].cos2) + (1 + 0.5 -1)*3.1415926;
+            }
+            objects[i].Ry = theta + alpha_decode;
+            objects[i].offset_y = std::max(std::min(proposals[picked[i]].offset_y / scale, (float)(img_h - 1)), 0.f);
+            objects[i].offset_x = std::max(std::min(proposals[picked[i]].offset_x / scale, (float)(img_w - 1)), 0.f);
+
         }
         auto end4 = std::chrono::system_clock::now();
         std::cout << "delay of decode output: ";
@@ -458,7 +519,7 @@ void doInference(IExecutionContext& context, float* input, float* output, const 
     cudaStreamSynchronize(stream);
     auto end = std::chrono::system_clock::now();
     std::cout << "inference delay: ";
-    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+    std::cout << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0 << "ms" << std::endl;
 
 
     // Release stream and buffers

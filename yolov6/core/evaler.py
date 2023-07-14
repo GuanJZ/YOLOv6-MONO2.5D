@@ -489,7 +489,7 @@ class Evaler:
                     final_preds_3d = [pred[pred[:, 15] >= conf_thres] for pred in preds_3d]
 
                     LOGGER.info("writing 3D BBoxes")
-                    show_2d3d_box(final_preds_3d, labels_3d, img_paths, self.data["names"], self.save_dir)
+                    show_2d3d_box(final_preds_3d, labels_3d, img_paths, self.data["names"], self.save_dir, False)
             else:
                 LOGGER.info("Calculate metric failed, might check dataset.")
                 self.pr_metric_result = (0.0, 0.0)
