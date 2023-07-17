@@ -37,6 +37,7 @@ if __name__ == '__main__':
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', type=float, default=0.4, help='conf threshold for NMS')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--opset-version', default=11, help='')
     args = parser.parse_args()
     args.img_size *= 2 if len(args.img_size) == 1 else 1  # expand
     print(args)
@@ -101,7 +102,7 @@ if __name__ == '__main__':
         LOGGER.info('\nStarting to export ONNX...')
         export_file = args.weights.replace('.pt', '.onnx')  # filename
         with BytesIO() as f:
-            torch.onnx.export(model, img, f, verbose=False, opset_version=13,
+            torch.onnx.export(model, img, f, verbose=False, opset_version=args.opset_version,
                               training=torch.onnx.TrainingMode.EVAL,
                               do_constant_folding=True,
                               input_names=['images'],
