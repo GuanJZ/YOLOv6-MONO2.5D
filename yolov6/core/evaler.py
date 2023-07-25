@@ -14,6 +14,7 @@ from pycocotools.cocoeval import COCOeval
 from yolov6.data.data_load import create_dataloader
 from yolov6.utils.events import LOGGER, NCOLS
 from yolov6.utils.nms import non_max_suppression
+from yolov6.utils.general import download_ckpt
 from yolov6.utils.checkpoint import load_checkpoint
 from yolov6.utils.torch_utils import time_sync, get_model_info
 
@@ -32,11 +33,8 @@ class Evaler:
                  device='',
                  half=True,
                  save_dir='',
-                 test_load_size=640,
-                 letterbox_return_int=False,
-                 force_no_pad=False,
-                 not_infer_on_rect=False,
-                 scale_exact=False,
+                 shrink_size=640,
+                 infer_on_rect=False,
                  verbose=False,
                  do_coco_metric=True,
                  do_pr_metric=False,
@@ -52,11 +50,8 @@ class Evaler:
         self.device = device
         self.half = half
         self.save_dir = save_dir
-        self.test_load_size = test_load_size
-        self.letterbox_return_int = letterbox_return_int
-        self.force_no_pad = force_no_pad
-        self.not_infer_on_rect = not_infer_on_rect
-        self.scale_exact = scale_exact
+        self.shrink_size = shrink_size
+        self.infer_on_rect = infer_on_rect
         self.verbose = verbose
         self.do_coco_metric = do_coco_metric
         self.do_pr_metric = do_pr_metric
@@ -65,6 +60,8 @@ class Evaler:
 
     def init_model(self, model, weights, task):
         if task != 'train':
+            if not os.path.exists(weights):
+                download_ckpt(weights)
             model = load_checkpoint(weights, map_location=self.device)
             self.stride = int(model.stride.max())
             if self.device.type != 'cpu':
@@ -88,12 +85,9 @@ class Evaler:
         if task != 'train':
             pad = 0.0 if task == 'speed' else 0.5
             eval_hyp = {
-                "test_load_size":self.test_load_size,
-                "letterbox_return_int":self.letterbox_return_int,
+                "shrink_size":self.shrink_size,
             }
-            if self.force_no_pad:
-                pad = 0.0
-            rect = not self.not_infer_on_rect
+            rect = self.infer_on_rect
             dataloader = create_dataloader(self.data[task if task in ('train', 'val', 'test') else 'val'],
                                            self.img_size, self.batch_size, self.stride, hyp=eval_hyp, check_labels=True, pad=pad, rect=rect,
                                            data_dict=self.data, task=task)[0]
@@ -340,20 +334,13 @@ class Evaler:
 
     def scale_coords(self, img1_shape, coords, img0_shape, ratio_pad=None):
         '''Rescale coords (xyxy) from img1_shape to img0_shape.'''
-        if ratio_pad is None:  # calculate from img0_shape
-            gain = [min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])]  # gain  = old / new
-            if self.scale_exact:
-                gain = [img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]]
-            pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
-        else:
-            gain = ratio_pad[0]
-            pad = ratio_pad[1]
+
+        gain = ratio_pad[0]
+        pad = ratio_pad[1]
 
         coords[:, [0, 2]] -= pad[0]  # x padding
-        if self.scale_exact:
-            coords[:, [0, 2]] /= gain[1]  # x gain
-        else:
-            coords[:, [0, 2]] /= gain[0]  # raw x gain
+
+        coords[:, [0, 2]] /= gain[1]  # raw x gain
         coords[:, [1, 3]] -= pad[1]  # y padding
         coords[:, [1, 3]] /= gain[0]  # y gain
 
@@ -468,7 +455,7 @@ class Evaler:
         def init_data(dataloader, task):
             self.is_coco = self.data.get("is_coco", False)
             self.ids = self.coco80_to_coco91_class() if self.is_coco else list(range(1000))
-            pad = 0.0 if task == 'speed' else 0.5
+            pad = 0.0 
             dataloader = create_dataloader(self.data[task if task in ('train', 'val', 'test') else 'val'],
                                            self.img_size, self.batch_size, self.stride, check_labels=True, pad=pad, rect=False,
                                            data_dict=self.data, task=task)[0]

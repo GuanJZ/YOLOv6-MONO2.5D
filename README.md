@@ -8,14 +8,16 @@ English | [简体中文](README_cn.md)
 
  <div>
     </a>
-    <a href="[https://colab.research.google.com/github/meituan/YOLOv6/blob/main/turtorial.ipynb](https://colab.research.google.com/gist/HouSanDuo123/bdad4ad6706209d4e9275d2186d54289/tutorial.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
+    <a href="https://colab.research.google.com/github/meituan/YOLOv6/blob/main/turtorial.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
      <a href="https://www.kaggle.com/code/housanduo/yolov6"><img src="https://kaggle.com/static/images/open-in-kaggle.svg" alt="Open In Kaggle"></a>
   </div>
  <br>
 
 ## YOLOv6
 
-Implementation of paper - [YOLOv6: A Single-Stage Object Detection Framework for Industrial Applications](https://arxiv.org/abs/2209.02976)
+Implementation of paper:
+- [YOLOv6 v3.0: A Full-Scale Reloading](https://arxiv.org/abs/2301.05586) 🔥
+- [YOLOv6: A Single-Stage Object Detection Framework for Industrial Applications](https://arxiv.org/abs/2209.02976)
 
 <p align="center">
   <img src="assets/speed_comparision_v3.png" align="middle" width = "1000" />
@@ -23,7 +25,9 @@ Implementation of paper - [YOLOv6: A Single-Stage Object Detection Framework for
 
 
 ## What's New
-
+- [2023.04.28] Release [YOLOv6Lite](configs/yolov6_lite/README.md) models on mobile or CPU. ⭐️ [Mobile Benchmark](#Mobile-Benchmark)
+- [2023.03.10] Release [YOLOv6-Face](https://github.com/meituan/YOLOv6/tree/yolov6-face). 🔥 [Performance](https://github.com/meituan/YOLOv6/tree/yolov6-face#performance-on-widerface)
+- [2023.03.02] Update [base models](configs/base/README.md) to version 3.0.
 - [2023.01.06] Release P6 models and enhance the performance of P5 models. ⭐️ [Benchmark](#Benchmark)
 - [2022.11.04] Release [base models](configs/base/README.md) to simplify the training and deployment process.
 - [2022.09.06] Customized quantization methods. 🚀 [Quantization Tutorial](./tools/qat/README.md)
@@ -80,9 +84,28 @@ Implementation of paper - [YOLOv6: A Single-Stage Object Detection Framework for
 
 </details>
 
+## Mobile Benchmark
+| Model | Size | mAP<sup>val<br/>0.5:0.95 | sm8350<br/><sup>(ms) | mt6853<br/><sup>(ms) | sdm660<br/><sup>(ms) |Params<br/><sup> (M) |   FLOPs<br/><sup> (G) |
+| :----------------------------------------------------------- | ---- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| [**YOLOv6Lite-S**](https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6lite_s.pt) | 320*320 | 22.4                     | 7.99                     | 11.99                     | 41.86                     | 0.55                     | 0.56                     |
+| [**YOLOv6Lite-M**](https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6lite_m.pt) | 320*320 | 25.1                     | 9.08                     | 13.27                     | 47.95                     | 0.79                     | 0.67                     |
+| [**YOLOv6Lite-L**](https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6lite_l.pt) | 320*320 | 28.0                     | 11.37                     | 16.20                     | 61.40                     | 1.09                     | 0.87                     |
+| [**YOLOv6Lite-L**](https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6lite_l.pt) | 320*192 | 25.0                     | 7.02                     | 9.66                     | 36.13                     | 1.09                     | 0.52                     |
+| [**YOLOv6Lite-L**](https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6lite_l.pt) | 224*128 | 18.9                     | 3.63                     | 4.99                     | 17.76                     | 1.09                     | 0.24                     |
+
+<details>
+<summary>Table Notes</summary>
+
+- From the perspective of model size and input image ratio, we have built a series of models on the mobile terminal to facilitate flexible applications in different scenarios. 
+- All checkpoints are trained with 400 epochs without distillation.
+- Results of the mAP and speed are evaluated on [COCO val2017](https://cocodataset.org/#download) dataset, and the input resolution is the Size in the table.
+- Speed is tested on MNN 2.3.0 AArch64 with 2 threads by arm82 acceleration. The inference warm-up is performed 10 times, and the cycle is performed 100 times.
+- Qualcomm 888(sm8350), Dimensity 720(mt6853) and Qualcomm 660(sdm660) correspond to chips with different performances at the high, middle and low end respectively, which can be used as a reference for model capabilities under different chips.
+- Refer to [Test NCNN Speed](./docs/Test_NCNN_speed.md) tutorial to reproduce the NCNN speed results of YOLOv6Lite.
+
+</details>
 
 ## Quick Start
-
 <details>
 <summary> Install</summary>
 
@@ -97,8 +120,14 @@ pip install -r requirements.txt
 
 
 <details>
-<summary> Training</summary>
+<summary> Reproduce our results on COCO</summary>
 
+Please refer to [Train COCO Dataset](./docs/Train_coco_data.md).
+
+</details>
+
+<details open>
+<summary> Finetune on custom data</summary>
 
 Single GPU
 
@@ -117,9 +146,9 @@ python -m torch.distributed.launch --nproc_per_node 8 tools/train.py --batch 256
 # P6 models
 python -m torch.distributed.launch --nproc_per_node 8 tools/train.py --batch 128 --conf configs/yolov6s6_finetune.py --data data/dataset.yaml --img 1280 --device 0,1,2,3,4,5,6,7
 ```
-- fuse_ab: add anchor-based auxiliary branch and use Anchor Unified Training Mode(Not supported on P6 models)
+- fuse_ab: add anchor-based auxiliary branch and use Anchor Aided Training Mode (Not supported on P6 models currently)
 - conf: select config file to specify network/optimizer/hyperparameters. We recommend to apply yolov6n/s/m/l_finetune.py when training on your custom dataset.
-- data: prepare [COCO](http://cocodataset.org) dataset, [YOLO format coco labels](https://github.com/meituan/YOLOv6/releases/download/0.1.0/coco2017labels.zip) and specify dataset paths in data.yaml
+- data: prepare dataset and specify dataset paths in data.yaml ( [COCO](http://cocodataset.org), [YOLO format coco labels](https://github.com/meituan/YOLOv6/releases/download/0.1.0/coco2017labels.zip) )
 - make sure your dataset structure as follows:
 ```
 ├── coco
@@ -136,8 +165,7 @@ python -m torch.distributed.launch --nproc_per_node 8 tools/train.py --batch 128
 │   ├── README.txt
 ```
 
-
-Reproduce our results on COCO ⭐️ [Train COCO Dataset](./docs/Train_coco_data.md)
+</details>
 
 <details>
 <summary>Resume training</summary>
@@ -160,12 +188,11 @@ Your can also specify a checkpoint path to `--resume` parameter by
 This will resume from the specific checkpoint you provide.
 
 </details>
-</details>
 
-<details>
+<details open>
 <summary> Evaluation</summary>
 
-Reproduce mAP on COCO val2017 dataset with 640×640 or 1280x1280 resolution ⭐️
+Reproduce mAP on COCO val2017 dataset with 640×640 or 1280x1280 resolution
 
 ```shell
 # P5 models
@@ -191,8 +218,16 @@ Second, run inference with `tools/infer.py`
 # P5 models
 python tools/infer.py --weights yolov6s.pt --source img.jpg / imgdir / video.mp4
 # P6 models
-python tools/infer.py --weights yolov6s6.pt --img 1280 --source img.jpg / imgdir / video.mp4
+python tools/infer.py --weights yolov6s6.pt --img 1280 1280 --source img.jpg / imgdir / video.mp4
 ```
+If you want to inference on local camera or  web camera, you can run:
+```shell
+# P5 models
+python tools/infer.py --weights yolov6s.pt --webcam --webcam-addr 0
+# P6 models
+python tools/infer.py --weights yolov6s6.pt --img 1280 1280 --webcam --webcam-addr 0
+```
+`webcam-addr` can be local camera number id or rtsp address.
 </details>
 
 <details>
@@ -207,6 +242,7 @@ python tools/infer.py --weights yolov6s6.pt --img 1280 --source img.jpg / imgdir
 <details open>
 <summary> Tutorials</summary>
 
+*  [User Guide(zh_CN)](https://yolov6-docs.readthedocs.io/zh_CN/latest/) 
 *  [Train COCO Dataset](./docs/Train_coco_data.md)
 *  [Train custom data](./docs/Train_custom_data.md)
 *  [Test speed](./docs/Test_speed.md)
@@ -225,6 +261,8 @@ python tools/infer.py --weights yolov6s6.pt --img 1280 --source img.jpg / imgdir
  * YOLOv6 TensorRT Windows C++: [yolort](https://github.com/zhiqwang/yolov5-rt-stack/tree/main/deployment/tensorrt-yolov6) from [Wei Zeng](https://github.com/Wulingtian)
 
  * [YOLOv6 web demo](https://huggingface.co/spaces/nateraw/yolov6) on [Huggingface Spaces](https://huggingface.co/spaces) with [Gradio](https://github.com/gradio-app/gradio). [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/nateraw/yolov6)
+
+ * [Interactive demo](https://yolov6.dagshubusercontent.com/) on [DagsHub](https://dagshub.com) with [Streamlit](https://github.com/streamlit/streamlit) 
 
  * Tutorial: [How to train YOLOv6 on a custom dataset](https://blog.roboflow.com/how-to-train-yolov6-on-a-custom-dataset/) <a href="https://colab.research.google.com/drive/1YnbqOinBZV-c9I7fk_UL6acgnnmkXDMM"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
 

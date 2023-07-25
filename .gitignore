@@ -115,3 +115,12 @@ venv.bak/
 *.onnx
 *.pt
 *.engine
+.idea
+data/coco128.yaml
+data/coco128
+data/Rope3D
+mini_rope3d
+*.cache
+deploy/TensorRT/cmake-build-debug/
+*.txt
+*.jpg

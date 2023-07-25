@@ -19,6 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 import tools.eval as eval
 from yolov6.data.data_load import create_dataloader
 from yolov6.models.yolo import build_model
+from yolov6.models.yolo_lite import build_model as build_lite_model
 
 from yolov6.models.losses.loss import ComputeLoss as ComputeLoss
 from yolov6.models.losses.loss_fuseab import ComputeLoss as ComputeLoss_ab
@@ -31,6 +32,7 @@ from yolov6.utils.checkpoint import load_state_dict, save_checkpoint, strip_opti
 from yolov6.solver.build import build_optimizer, build_lr_scheduler
 from yolov6.utils.RepOptimizer import extract_scales, RepVGGOptimizer
 from yolov6.utils.nms import xywh2xyxy
+from yolov6.utils.general import download_ckpt
 
 
 class Trainer:
@@ -78,6 +80,7 @@ class Trainer:
             model.load_state_dict(resume_state_dict, strict=True)  # load
             self.start_epoch = self.ckpt['epoch'] + 1
             self.optimizer.load_state_dict(self.ckpt['optimizer'])
+            self.scheduler.load_state_dict(self.ckpt['scheduler'])
             if self.main_process:
                 self.ema.ema.load_state_dict(self.ckpt['ema'].float().state_dict())
                 self.ema.updates = self.ckpt['updates']
@@ -163,9 +166,9 @@ class Trainer:
         self.update_optimizer()
 
     def eval_and_save(self):
-        remaining_epochs = self.max_epoch - self.epoch
-        eval_interval = self.args.eval_interval if remaining_epochs > self.args.heavy_eval_range else 3
-        is_val_epoch = (not self.args.eval_final_only or (remaining_epochs == 1)) and (self.epoch % eval_interval == 0)
+        remaining_epochs = self.max_epoch - 1 - self.epoch # self.epoch is start from 0
+        eval_interval = self.args.eval_interval if remaining_epochs >= self.args.heavy_eval_range else 3
+        is_val_epoch = (remaining_epochs == 0) or ((not self.args.eval_final_only) and ((self.epoch + 1) % eval_interval == 0))
         if self.main_process:
             self.ema.update_attr(self.model, include=['nc', 'names', 'stride']) # update attributes for ema model
             if is_val_epoch:
@@ -178,7 +181,9 @@ class Trainer:
                     'ema': deepcopy(self.ema.ema).half(),
                     'updates': self.ema.updates,
                     'optimizer': self.optimizer.state_dict(),
+                    'scheduler': self.scheduler.state_dict(),
                     'epoch': self.epoch,
+                    'results': self.evaluate_results,
                     }
 
             save_ckpt_dir = osp.join(self.save_dir, 'weights')
@@ -230,11 +235,8 @@ class Trainer:
                             dataloader=self.val_loader,
                             save_dir=self.save_dir,
                             task='train',
-                            test_load_size=get_cfg_value(self.cfg.eval_params, "test_load_size", eval_img_size),
-                            letterbox_return_int=get_cfg_value(self.cfg.eval_params, "letterbox_return_int", False),
-                            force_no_pad=get_cfg_value(self.cfg.eval_params, "force_no_pad", False),
-                            not_infer_on_rect=get_cfg_value(self.cfg.eval_params, "not_infer_on_rect", False),
-                            scale_exact=get_cfg_value(self.cfg.eval_params, "scale_exact", False),
+                            shrink_size=get_cfg_value(self.cfg.eval_params, "shrink_size", eval_img_size),
+                            infer_on_rect=get_cfg_value(self.cfg.eval_params, "infer_on_rect", False),
                             verbose=get_cfg_value(self.cfg.eval_params, "verbose", False),
                             do_coco_metric=get_cfg_value(self.cfg.eval_params, "do_coco_metric", True),
                             do_pr_metric=get_cfg_value(self.cfg.eval_params, "do_pr_metric", False),
@@ -259,6 +261,12 @@ class Trainer:
         self.best_ap, self.ap = 0.0, 0.0
         self.best_stop_strong_aug_ap = 0.0
         self.evaluate_results = (0, 0) # AP50, AP50_95
+        # resume results
+        if hasattr(self, "ckpt"):
+            self.evaluate_results = self.ckpt['results']
+            self.best_ap = self.evaluate_results[1]
+            self.best_stop_strong_aug_ap = self.evaluate_results[1]
+
         
         self.compute_loss = ComputeLoss(num_classes=self.data_dict['nc'],
                                         ori_img_size=self.img_size,
@@ -266,7 +274,7 @@ class Trainer:
                                         use_dfl=self.cfg.model.head.use_dfl,
                                         reg_max=self.cfg.model.head.reg_max,
                                         iou_type=self.cfg.model.head.iou_type,
-										fpn_strides=self.cfg.model.head.strides)
+					                    fpn_strides=self.cfg.model.head.strides)
 
         if self.args.fuse_ab:
             self.compute_loss_ab = ComputeLoss_ab(num_classes=self.data_dict['nc'],
@@ -296,6 +304,9 @@ class Trainer:
     def prepare_for_steps(self):
         if self.epoch > self.start_epoch:
             self.scheduler.step()
+        elif  hasattr(self, "ckpt") and self.epoch == self.start_epoch: # resume first epoch, load lr
+            for k, param in enumerate(self.optimizer.param_groups):
+                param['lr'] = self.scheduler.get_lr()[k]
         #stop strong aug like mosaic and mixup from last n epoch by recreate dataloader
         if self.epoch == self.max_epoch - self.args.stop_aug_last_n_epoch:
             self.cfg.data_aug.mosaic = 0.0
@@ -378,9 +389,16 @@ class Trainer:
         return images, targets
 
     def get_model(self, args, cfg, nc, device):
-        model = build_model(cfg, nc, device, fuse_ab=self.args.fuse_ab, distill_ns=self.distill_ns)
+        if 'YOLOv6-lite' in cfg.model.type:
+            assert not self.args.fuse_ab, 'ERROR in: YOLOv6-lite models not support fuse_ab mode.'
+            assert not self.args.distill, 'ERROR in: YOLOv6-lite models not support distill mode.'
+            model = build_lite_model(cfg, nc, device)
+        else:
+            model = build_model(cfg, nc, device, fuse_ab=self.args.fuse_ab, distill_ns=self.distill_ns)
         weights = cfg.model.pretrained
         if weights:  # finetune if pretrained model is set
+            if not os.path.exists(weights):
+                download_ckpt(weights)
             LOGGER.info(f'Loading state_dict from {weights} for fine-tuning...')
             model = load_state_dict(weights, model, map_location=device)
 
