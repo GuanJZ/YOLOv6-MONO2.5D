@@ -42,7 +42,8 @@ class Evaler:
                  do_pr_metric=False,
                  plot_curve=True,
                  plot_confusion_matrix=False,
-                 val_trt=False
+                 val_trt=False,
+                 val_onnx=False
                  ):
         assert do_pr_metric or do_coco_metric, 'ERROR: at least set one val metric'
         self.data = data
@@ -64,6 +65,7 @@ class Evaler:
         self.plot_curve = plot_curve
         self.plot_confusion_matrix = plot_confusion_matrix
         self.val_trt = val_trt
+        self.val_onnx = val_onnx
         self.model_names = data["names"]
 
     def init_engine(self, engine):
@@ -85,6 +87,13 @@ class Evaler:
         binding_addrs = OrderedDict((n, d.ptr) for n, d in bindings.items())
         context = model.create_execution_context()
         return context, bindings, binding_addrs, model.get_binding_shape(0)[0]
+
+    def init_onnx(self, onnx_model):
+        import onnxruntime
+        LOGGER.info("init ONNX model ...")
+        session = onnxruntime.InferenceSession(onnx_model, None)
+        input_name = session.get_inputs()[0].name
+        return session, input_name
 
     def init_model(self, model, weights, task):
         if task != 'train':
@@ -140,6 +149,9 @@ class Evaler:
                 binding_addrs['images'] = int(tmp.data_ptr())
                 context.execute_v2(list(binding_addrs.values()))
 
+        if self.val_onnx:
+            model, input_name = model
+
         # whether to compute metric and plot PR curve and P、R、F1 curve under iou50 match rule
         if self.do_pr_metric:
             stats, ap = [], []
@@ -165,6 +177,8 @@ class Evaler:
                 binding_addrs['images'] = int(imgs.data_ptr())
                 context.execute_v2(list(binding_addrs.values()))
                 outputs = bindings["outputs"].data
+            elif self.val_onnx:
+                outputs = torch.tensor(model.run([], {input_name: imgs.cpu().numpy()})[0])
             else:
                 outputs, _ = model(imgs)
             self.speed_result[2] += time_sync() - t2  # inference time
@@ -353,7 +367,7 @@ class Evaler:
             cocoEval.summarize()
             map, map50 = cocoEval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
             # Return results
-            if not self.val_trt:
+            if not self.val_trt and not self.val_onnx:
                 model.float()  # for training
             if task != 'train':
                 LOGGER.info(f"Results saved to {self.save_dir}")

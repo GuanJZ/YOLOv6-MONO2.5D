@@ -119,7 +119,15 @@ class Detect(nn.Module):
 
 
             pred_bboxes = dist2bbox(reg_dist_list, anchor_points, box_format='xywh')
-            pred_bboxes *= stride_tensor
+
+            if pred_bboxes.shape[0] == 1:
+                pred_bboxes *= stride_tensor.unsqueeze(0)
+            else:
+                stride_tensor_0 =  stride_tensor.unsqueeze(0)
+                for _ in range(pred_bboxes.shape[0]-1):
+                    stride_tensor_0 = torch.cat((stride_tensor_0, stride_tensor.unsqueeze(0)))
+                pred_bboxes *= stride_tensor_0
+
             return torch.cat(
                 [
                     pred_bboxes,
