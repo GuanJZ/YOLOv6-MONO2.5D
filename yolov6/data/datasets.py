@@ -218,7 +218,7 @@ class TrainValDataset(Dataset):
         valid_img_record = osp.join(
             osp.dirname(img_dir), "." + osp.basename(img_dir) + ".json"
         )
-        NUM_THREADS = min(8, os.cpu_count())
+        NUM_THREADS = min(48, os.cpu_count())
 
         img_paths = glob.glob(osp.join(img_dir, "**/*"), recursive=True)
         img_paths = sorted(
@@ -269,7 +269,7 @@ class TrainValDataset(Dataset):
         base_dir = osp.basename(img_dir)
         if base_dir != "":
             label_dir = osp.join(
-            osp.dirname(osp.dirname(img_dir)), "labels", osp.basename(img_dir)
+            osp.dirname(osp.dirname(img_dir)), "labels_yolo_MONO_2D", osp.basename(img_dir)
             )
             assert osp.exists(label_dir), f"{label_dir} is an invalid directory path!"
         else:
@@ -278,7 +278,7 @@ class TrainValDataset(Dataset):
             for rootdir, dirs, files in os.walk(label_dir):
                 for subdir in dirs:
                     sub_dirs.append(subdir)
-            assert "labels" in sub_dirs, f"Could not find a labels directory!"
+            assert "labels_yolo_MONO_2D" in sub_dirs, f"Could not find a labels directory!"
 
 
         # Look for labels in the save relative dir that the images are in

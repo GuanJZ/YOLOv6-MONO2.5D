@@ -84,7 +84,7 @@ def build_network(config, channels, num_classes, num_layers, fuse_ab=False, dist
             csp_e=config.model.backbone.csp_e,
             fuse_P2=fuse_P2,
             cspsppf=cspsppf,
-            stage_block_type=stage_block_type
+            # stage_block_type=stage_block_type
         )
 
         neck = NECK(
@@ -92,7 +92,7 @@ def build_network(config, channels, num_classes, num_layers, fuse_ab=False, dist
             num_repeats=num_repeat,
             block=block,
             csp_e=config.model.neck.csp_e,
-            stage_block_type=stage_block_type
+            # stage_block_type=stage_block_type
         )
     else:
         backbone = BACKBONE(
