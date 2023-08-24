@@ -207,6 +207,7 @@ class Evaler:
 
             # post-process
             t3 = time_sync()
+            self.conf_thres = 0.4
             outputs = non_max_suppression(outputs, self.conf_thres, self.iou_thres, multi_label=True)
             self.speed_result[3] += time_sync() - t3  # post-process time
             self.speed_result[0] += len(outputs)
@@ -489,7 +490,7 @@ class Evaler:
                     final_preds_3d = [pred[pred[:, 15] >= conf_thres] for pred in preds_3d]
 
                     LOGGER.info("writing 3D BBoxes")
-                    show_2d3d_box(final_preds_3d, labels_3d, img_paths, self.data["names"], self.save_dir, False)
+                    show_2d3d_box(final_preds_3d, labels_3d, img_paths, self.data["names"], self.save_dir, True)
             else:
                 LOGGER.info("Calculate metric failed, might check dataset.")
                 self.pr_metric_result = (0.0, 0.0)
