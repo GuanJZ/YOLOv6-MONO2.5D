@@ -548,7 +548,7 @@ class TrainValDataset(Dataset):
             dataset["images"].append(
                 {
                     "file_name": os.path.basename(img_path),
-                    "id": img_id,
+                    "id": i,
                     "width": img_w,
                     "height": img_h,
                 }
@@ -571,7 +571,7 @@ class TrainValDataset(Dataset):
                             "bbox": [x1, y1, w, h],
                             "category_id": cls_id,
                             "id": ann_id,
-                            "image_id": img_id,
+                            "image_id": i,
                             "iscrowd": 0,
                             # mask
                             "segmentation": [],

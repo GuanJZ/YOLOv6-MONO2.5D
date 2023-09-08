@@ -10,11 +10,11 @@ test: data/mini_rope3d/images/val
 anno_path: data/mini_rope3d/annotations/instances_val.json
 
 # number of classes
-nc: 12
+nc: 4
 # whether it is coco dataset, only coco dataset should be set to True.
 is_coco: False
 
 # class names
-#names: ['pedestrian', 'cyclist', 'car', 'big_vehicle']
-names: ['trafficcone', 'tricyclist', 'van', 'cyclist', 'unknowns_movable', 'car', 'pedestrian',
-  'unknown_unmovable', 'bus', 'truck', 'barrow', 'motorcyclist']
+names: ['pedestrian', 'cyclist', 'car', 'big_vehicle']
+#names: ['trafficcone', 'tricyclist', 'van', 'cyclist', 'unknowns_movable', 'car', 'pedestrian',
+#  'unknown_unmovable', 'bus', 'truck', 'barrow', 'motorcyclist']
