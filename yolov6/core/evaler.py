@@ -534,7 +534,6 @@ class Evaler:
 
             #print each class ap from pycocotool result
             if self.verbose:
-
                 import copy
                 val_dataset_img_count = cocoEval.cocoGt.imgToAnns.__len__()
                 val_dataset_anns_count = 0
